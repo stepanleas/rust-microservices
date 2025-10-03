@@ -1,0 +1,6 @@
+[submodule "catalog"]
+	path = catalog
+	url = git@github.com:stepanleas/rust-catalog.git
+[submodule "order"]
+	path = order
+	url = git@github.com:stepanleas/rust-order.git

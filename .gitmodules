@@ -4,3 +4,6 @@
 [submodule "order"]
 	path = order
 	url = git@github.com:stepanleas/rust-order.git
+[submodule "spring-boot-api-gateway"]
+	path = spring-boot-api-gateway
+	url = git@github.com:stepanleas/spring-boot-api-gateway.git

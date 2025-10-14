@@ -7,3 +7,6 @@
 [submodule "spring-boot-api-gateway"]
 	path = spring-boot-api-gateway
 	url = git@github.com:stepanleas/spring-boot-api-gateway.git
+[submodule "customer"]
+	path = customer
+	url = git@github.com:stepanleas/rust-customer.git

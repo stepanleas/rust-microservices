@@ -1,4 +1,4 @@
-services := catalog
+services := catalog order customer
 
 build_images:
 	@start=$$(date +%s); \

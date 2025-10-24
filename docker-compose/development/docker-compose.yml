@@ -25,6 +25,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: catalog_db
     ports:
       - "5432:5432"
     networks:
@@ -37,8 +38,124 @@ services:
       timeout: 30s
       retries: 15
 
+  order:
+    image: artellas/rust-order:1
+    container_name: order-container
+    environment:
+      APP_ENVIRONMENT: development
+      APP_HTTP_URL: 0.0.0.0:8081
+    ports:
+      - "8081:8080"
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8081/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - rust-microservices-network
+
+  order-db:
+    image: postgres:18-alpine
+    container_name: order-db-container
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: order_db
+    ports:
+      - "5433:5432"
+    networks:
+      - rust-microservices-network
+    volumes:
+      - order-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "PGPASSWORD=postgres pg_isready -U postgres -h order-db" ]
+      interval: 10s
+      timeout: 30s
+      retries: 15
+
+  customer:
+    image: artellas/rust-customer:1
+    container_name: customer-container
+    environment:
+      APP_ENVIRONMENT: development
+      APP_HTTP_URL: 0.0.0.0:8082
+    ports:
+      - "8082:8080"
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8082/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - rust-microservices-network
+
+  customer-db:
+    image: postgres:18-alpine
+    container_name: customer-db-container
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: customer_db
+    ports:
+      - "5434:5432"
+    networks:
+      - rust-microservices-network
+    volumes:
+      - customer-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "PGPASSWORD=postgres pg_isready -U postgres -h customer-db" ]
+      interval: 10s
+      timeout: 30s
+      retries: 15
+
+  kafka:
+    image: docker.io/bitnami/kafka:3.9
+    container_name: kafka-container
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami
+    environment:
+      # KRaft settings
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      # Listeners
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+    networks:
+      - rust-microservices-network
+
+  kafka-init:
+    image: docker.io/bitnami/kafka:3.9
+    depends_on:
+      - kafka
+    volumes:
+      - ./kafka/create-topics.sh:/create-topics.sh
+      - ./kafka/topics:/topics
+    entrypoint: [ "/bin/bash", "/create-topics.sh" ]
+    environment:
+      - KAFKA_BROKER=kafka:9092
+    networks:
+      - rust-microservices-network
+
 volumes:
   catalog-db:
+  order-db:
+  customer-db:
+  kafka_data:
+    driver: local
 
 networks:
   rust-microservices-network:

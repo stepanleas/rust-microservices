@@ -1,0 +1,14 @@
+{
+  "topics": [
+    {
+      "topic": "customer.created",
+      "num_partitions": 3,
+      "replication_factor": 1
+    },
+    {
+      "topic": "customer.updated",
+      "num_partitions": 3,
+      "replication_factor": 1
+    }
+  ]
+}

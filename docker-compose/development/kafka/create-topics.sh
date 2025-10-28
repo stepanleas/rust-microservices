@@ -26,7 +26,7 @@ for file in "$TOPIC_DIR"/*.json; do
   # Clean up JSON: remove spaces and newlines
   json=$(tr -d '\n' < "$file" | tr -d '[:space:]')
 
-  # Extract blocks like: {"topic":"customer.created","num_partitions":3,"replication_factor":1}
+  # Extract blocks like: {"topic":"customer-created","num_partitions":3,"replication_factor":1}
   echo "$json" | grep -o '{[^}]*}' | while IFS= read -r block; do
     topic=$(echo "$block" | sed -n 's/.*"topic":"\([^"]*\)".*/\1/p')
     partitions=$(echo "$block" | sed -n 's/.*"num_partitions":\([0-9]*\).*/\1/p')

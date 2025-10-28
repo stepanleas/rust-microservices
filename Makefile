@@ -12,6 +12,15 @@ build_images:
 	end=$$(date +%s); \
 	echo "Concurrent build took $$((end - start)) seconds."
 
+remove_images:
+	@for service in $(services); do \
+		( \
+			echo "==== Removing artellas/rust-$$service:$(version) ===="; \
+			docker rmi artellas/rust-$$service:$(version); \
+		) & \
+	done; \
+	wait
+
 push_images:
 	@for service in $(services); do \
 		( \

@@ -1,12 +1,12 @@
 {
   "topics": [
     {
-      "topic": "customer-created",
+      "topic": "product-created",
       "num_partitions": 3,
       "replication_factor": 1
     },
     {
-      "topic": "customer-updated",
+      "topic": "product-updated",
       "num_partitions": 3,
       "replication_factor": 1
     }

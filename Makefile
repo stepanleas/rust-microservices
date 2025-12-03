@@ -8,9 +8,13 @@ build_images:
 			cd $$service && docker build -t artellas/rust-$$service:$(version) . && cd - > /dev/null; \
 		) & \
 	done; \
+	( \
+		echo "==== Building gateway ===="; \
+		cd spring-boot-api-gateway && mvn clean compile jib:dockerBuild && cd - > /dev/null; \
+	) & \
 	wait; \
 	end=$$(date +%s); \
-	echo "Concurrent build took $$((end - start)) seconds."
+	echo "✅ Concurrent build took $$((end - start)) seconds."
 
 remove_images:
 	@for service in $(services); do \
@@ -19,6 +23,10 @@ remove_images:
 			docker rmi artellas/rust-$$service:$(version); \
 		) & \
 	done; \
+	( \
+		echo "==== Removing artellas/rust-spring-boot-api-gateway:$(version) ===="; \
+		docker rmi artellas/rust-spring-boot-api-gateway:$(version); \
+	) & \
 	wait
 
 push_images:
@@ -28,4 +36,8 @@ push_images:
 			docker push artellas/rust-$$service:$(version); \
 		) & \
 	done; \
+	( \
+		echo "==== Pushing artellas/rust-spring-boot-api-gateway:$(version) ===="; \
+		docker push artellas/rust-spring-boot-api-gateway:$(version); \
+	) & \
 	wait

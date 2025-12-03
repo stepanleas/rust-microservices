@@ -114,6 +114,22 @@ services:
       timeout: 30s
       retries: 15
 
+  api-gateway:
+    image: artellas/rust-spring-boot-api-gateway:1
+    container_name: api-gateway-container
+    ports:
+      - "8072:8072"
+    depends_on:
+      catalog:
+        condition: service_healthy
+      customer:
+        condition: service_healthy
+      order:
+        condition: service_healthy
+    environment:
+      SPRING_APPLICATION_NAME: api-gateway
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: "http://keycloak:8080/realms/master/protocol/openid-connect/certs"
+
   kafka:
     image: docker.io/bitnami/kafka:3.9
     container_name: kafka-container

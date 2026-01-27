@@ -1,0 +1,14 @@
+{
+  "topics": [
+    {
+      "topic": "product-created",
+      "num_partitions": 3,
+      "replication_factor": 1
+    },
+    {
+      "topic": "product-updated",
+      "num_partitions": 3,
+      "replication_factor": 1
+    }
+  ]
+}

@@ -2,14 +2,10 @@ version: '3.8'
 
 services:
   catalog:
-    build:
-      context: ../../catalog
-      dockerfile: Dockerfile-dev
-    image: rust-catalog:dev
+    image: artellas/rust-catalog:1
     container_name: catalog-container
     environment:
-      ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
+      APP_ENVIRONMENT: production
     ports:
       - "8080:8080"
     depends_on:
@@ -23,10 +19,6 @@ services:
       start_period: 10s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../catalog:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/catalog:/app/target
 
   catalog-db:
     image: postgres:18-alpine
@@ -48,13 +40,10 @@ services:
       retries: 15
 
   order:
-    build:
-      context: ../../order
-      dockerfile: Dockerfile-dev
-    image: rust-order:dev
+    image: artellas/rust-order:1
     container_name: order-container
     environment:
-      APP_ENVIRONMENT: development
+      APP_ENVIRONMENT: production
       RUST_LOG: debug,kafka=warn
     ports:
       - "8081:8081"
@@ -69,10 +58,6 @@ services:
       start_period: 10s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../order:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/order:/app/target
 
   order-db:
     image: postgres:18-alpine
@@ -94,14 +79,10 @@ services:
       retries: 15
 
   customer:
-    build:
-      context: ../../order
-      dockerfile: Dockerfile-dev
-    image: rust-customer:dev
+    image: artellas/rust-customer:1
     container_name: customer-container
     environment:
-      APP_ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
+      APP_ENVIRONMENT: production
     ports:
       - "8082:8082"
     depends_on:
@@ -115,10 +96,6 @@ services:
       start_period: 10s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../customer:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/customer:/app/target
 
   customer-db:
     image: postgres:18-alpine

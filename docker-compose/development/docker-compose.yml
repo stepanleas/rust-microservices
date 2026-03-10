@@ -5,16 +5,19 @@ services:
     build:
       context: ../../catalog
       dockerfile: Dockerfile-dev
-    image: rust-catalog:dev
+    image: artellas/rust-catalog:dev
     container_name: catalog-container
     environment:
       ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
     ports:
       - "8080:8080"
     depends_on:
       catalog-db:
         condition: service_healthy
+    volumes:
+      - ../../catalog:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/shared-target:/app/target
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://0.0.0.0:8080/api/health/ready | grep '\"status\":\"Ok\"' || exit 1"]
       interval: 10s
@@ -23,10 +26,6 @@ services:
       start_period: 10s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../catalog:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/catalog:/app/target
 
   catalog-db:
     image: postgres:18-alpine
@@ -37,8 +36,6 @@ services:
       POSTGRES_DB: catalog_db
     ports:
       - "5432:5432"
-    networks:
-      - rust-microservices-network
     volumes:
       - catalog-db:/var/lib/postgresql/data
     healthcheck:
@@ -46,21 +43,26 @@ services:
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   order:
     build:
       context: ../../order
       dockerfile: Dockerfile-dev
-    image: rust-order:dev
+    image: artellas/rust-order:dev
     container_name: order-container
     environment:
       APP_ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
     ports:
       - "8081:8081"
     depends_on:
       catalog-db:
         condition: service_healthy
+    volumes:
+      - ../../order:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/shared-target:/app/target
     healthcheck:
       test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8081/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
       interval: 10s
@@ -69,10 +71,6 @@ services:
       start_period: 10s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../order:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/order:/app/target
 
   order-db:
     image: postgres:18-alpine
@@ -83,8 +81,6 @@ services:
       POSTGRES_DB: order_db
     ports:
       - "5433:5432"
-    networks:
-      - rust-microservices-network
     volumes:
       - order-db:/var/lib/postgresql/data
     healthcheck:
@@ -92,16 +88,17 @@ services:
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   customer:
     build:
       context: ../../order
       dockerfile: Dockerfile-dev
-    image: rust-customer:dev
+    image: artellas/rust-customer:dev
     container_name: customer-container
     environment:
       APP_ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
     ports:
       - "8082:8082"
     depends_on:
@@ -113,12 +110,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-    networks:
-      - rust-microservices-network
     volumes:
       - ../../customer:/app
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/customer:/app/target
+      - ../../volumes/shared-target:/app/target
+    networks:
+      - rust-microservices-network
 
   customer-db:
     image: postgres:18-alpine
@@ -129,8 +126,6 @@ services:
       POSTGRES_DB: customer_db
     ports:
       - "5434:5432"
-    networks:
-      - rust-microservices-network
     volumes:
       - customer-db:/var/lib/postgresql/data
     healthcheck:
@@ -138,12 +133,14 @@ services:
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   api-gateway:
     image: artellas/rust-spring-boot-api-gateway:1
     container_name: api-gateway-container
     ports:
-      - "8072:8072"
+      - "8070:8070"
     depends_on:
       catalog:
         condition: service_healthy
@@ -154,6 +151,11 @@ services:
     environment:
       SPRING_APPLICATION_NAME: api-gateway
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: "http://keycloak:8080/realms/master/protocol/openid-connect/certs"
+      MICROSERVICE_CATALOG_URL: "http://catalog:8080"
+      MICROSERVICE_ORDER_URL: "http://order:8081"
+      MICROSERVICE_CUSTOMER_URL: "http://customer:8082"
+    networks:
+      - rust-microservices-network
 
   kafka:
     image: docker.io/bitnami/kafka:3.9

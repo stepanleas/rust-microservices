@@ -16,6 +16,22 @@ build_images:
 	end=$$(date +%s); \
 	echo "✅ Concurrent build took $$((end - start)) seconds."
 
+build_dev_images:
+	@start=$$(date +%s); \
+	for service in $(services); do \
+		( \
+			echo "==== Building $$service ===="; \
+			cd $$service && docker build -f Dockerfile-dev -t artellas/rust-$$service:dev . && cd - > /dev/null; \
+		) & \
+	done; \
+	( \
+		echo "==== Building gateway ===="; \
+		cd spring-boot-api-gateway && mvn clean compile jib:dockerBuild && cd - > /dev/null; \
+	) & \
+	wait; \
+	end=$$(date +%s); \
+	echo "✅ Concurrent build took $$((end - start)) seconds."
+
 remove_images:
 	@for service in $(services); do \
 		( \

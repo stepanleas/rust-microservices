@@ -29,8 +29,6 @@ services:
       POSTGRES_DB: catalog_db
     ports:
       - "5432:5432"
-    networks:
-      - rust-microservices-network
     volumes:
       - catalog-db:/var/lib/postgresql/data
     healthcheck:
@@ -38,6 +36,8 @@ services:
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   order:
     image: artellas/rust-order:1
@@ -68,8 +68,6 @@ services:
       POSTGRES_DB: order_db
     ports:
       - "5433:5432"
-    networks:
-      - rust-microservices-network
     volumes:
       - order-db:/var/lib/postgresql/data
     healthcheck:
@@ -77,6 +75,8 @@ services:
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   customer:
     image: artellas/rust-customer:1
@@ -106,8 +106,6 @@ services:
       POSTGRES_DB: customer_db
     ports:
       - "5434:5432"
-    networks:
-      - rust-microservices-network
     volumes:
       - customer-db:/var/lib/postgresql/data
     healthcheck:
@@ -115,12 +113,14 @@ services:
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   api-gateway:
     image: artellas/rust-spring-boot-api-gateway:1
     container_name: api-gateway-container
     ports:
-      - "8072:8072"
+      - "8070:8070"
     depends_on:
       catalog:
         condition: service_healthy
@@ -131,6 +131,11 @@ services:
     environment:
       SPRING_APPLICATION_NAME: api-gateway
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: "http://keycloak:8080/realms/master/protocol/openid-connect/certs"
+      MICROSERVICE_CATALOG_URL: "http://catalog:8080"
+      MICROSERVICE_ORDER_URL: "http://order:8081"
+      MICROSERVICE_CUSTOMER_URL: "http://customer:8082"
+    networks:
+      - rust-microservices-network
 
   kafka:
     image: docker.io/bitnami/kafka:3.9
@@ -174,5 +179,7 @@ volumes:
     driver: local
 
 networks:
+  default:
+    external: false
   rust-microservices-network:
     driver: bridge

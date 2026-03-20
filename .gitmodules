@@ -7,9 +7,12 @@
 [submodule "payment"]
 	path = payment
 	url = git@github.com:stepanleas/rust-payment.git
-[submodule "spring-boot-api-gateway"]
-	path = spring-boot-api-gateway
-	url = git@github.com:stepanleas/spring-boot-api-gateway.git
+[submodule "restaurant"]
+	path = restaurant
+	url = git@github.com:stepanleas/rust-restaurant.git
 [submodule "customer"]
 	path = customer
 	url = git@github.com:stepanleas/rust-customer.git
+[submodule "spring-boot-api-gateway"]
+	path = spring-boot-api-gateway
+	url = git@github.com:stepanleas/spring-boot-api-gateway.git

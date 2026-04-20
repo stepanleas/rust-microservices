@@ -10,8 +10,8 @@ mod tests {
     fn test_create_product_command() {
         let category_id = Uuid::new_v4();
         let command = CreateProductCommand::new(
-            "Test Product".to_string(),
-            "A product for testing".to_string(),
+            "Test Product",
+            "A product for testing",
             10,
             dec!(99.99),
             category_id,
@@ -30,8 +30,8 @@ mod tests {
         let category_id = Uuid::new_v4();
         let command = UpdateProductCommand::new(
             product_id,
-            "Test Product".to_string(),
-            "A product for testing".to_string(),
+            "Test Product",
+            "A product for testing",
             10,
             dec!(99.99),
             category_id,

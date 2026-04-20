@@ -15,5 +15,3 @@ rust_decimal.workspace = true
 shared.workspace = true
 
 domain = { path = "../domain" }
-
-[dev-dependencies]

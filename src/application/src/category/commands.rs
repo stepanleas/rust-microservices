@@ -1,34 +1,32 @@
 use uuid::Uuid;
 
-pub struct CreateCategoryCommand {
-    title: String,
-    description: String,
+pub struct CreateCategoryCommand<'a> {
+    title: &'a str,
+    description: &'a str,
 }
 
-impl CreateCategoryCommand {
-    pub fn new(title: String, description: String) -> Self {
+impl<'a> CreateCategoryCommand<'a> {
+    pub fn new(title: &'a str, description: &'a str) -> Self {
         CreateCategoryCommand { title, description }
     }
-}
 
-impl CreateCategoryCommand {
     pub fn title(&self) -> &str {
-        &self.title
+        self.title
     }
 
     pub fn description(&self) -> &str {
-        &self.description
+        self.description
     }
 }
 
-pub struct UpdateCategoryCommand {
+pub struct UpdateCategoryCommand<'a> {
     id: Uuid,
-    title: String,
-    description: String,
+    title: &'a str,
+    description: &'a str,
 }
 
-impl UpdateCategoryCommand {
-    pub fn new(id: Uuid, title: String, description: String) -> Self {
+impl<'a> UpdateCategoryCommand<'a> {
+    pub fn new(id: Uuid, title: &'a str, description: &'a str) -> Self {
         UpdateCategoryCommand {
             id,
             title,
@@ -41,11 +39,11 @@ impl UpdateCategoryCommand {
     }
 
     pub fn title(&self) -> &str {
-        &self.title
+        self.title
     }
 
     pub fn description(&self) -> &str {
-        &self.description
+        self.description
     }
 }
 

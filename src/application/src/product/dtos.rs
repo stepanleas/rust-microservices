@@ -52,3 +52,16 @@ impl From<Product> for ProductDto {
         }
     }
 }
+
+impl From<&Product> for ProductDto {
+    fn from(product: &Product) -> Self {
+        Self {
+            id: product.id().into(),
+            title: product.title().into(),
+            description: product.description().into(),
+            quantity: product.quantity(),
+            price: *product.price(),
+            category: product.category().into(),
+        }
+    }
+}

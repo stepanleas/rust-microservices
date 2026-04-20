@@ -49,7 +49,7 @@ impl CreateCategoryCommandHandler {
         Self { repository }
     }
 
-    pub async fn execute(&self, command: CreateCategoryCommand) -> anyhow::Result<CategoryDto> {
+    pub async fn execute(&self, command: CreateCategoryCommand<'_>) -> anyhow::Result<CategoryDto> {
         let category = Category::builder()
             .id(CategoryId::new())
             .title(command.title())
@@ -69,7 +69,7 @@ impl UpdateCategoryCommandHandler {
         Self { repository }
     }
 
-    pub async fn execute(&self, command: UpdateCategoryCommand) -> anyhow::Result<CategoryDto> {
+    pub async fn execute(&self, command: UpdateCategoryCommand<'_>) -> anyhow::Result<CategoryDto> {
         let category = Category::builder()
             .id(CategoryId::from_uuid(command.id()))
             .title(command.title())

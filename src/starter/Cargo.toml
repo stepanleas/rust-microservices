@@ -18,5 +18,3 @@ application = { path = "../application" }
 presentation = { path = "../presentation" }
 infrastructure = { path = "../infrastructure" }
 messaging = { path = "../messaging" }
-
-[dev-dependencies]

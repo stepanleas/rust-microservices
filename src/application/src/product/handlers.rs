@@ -62,7 +62,7 @@ impl CreateProductCommandHandler {
     }
 
     // TODO: Add transactional outbox
-    pub async fn execute(&self, command: CreateProductCommand) -> anyhow::Result<ProductDto> {
+    pub async fn execute(&self, command: CreateProductCommand<'_>) -> anyhow::Result<ProductDto> {
         let category = self
             .category_repository
             .find_by_id(CategoryId::from_uuid(command.category_id()))?;
@@ -82,10 +82,11 @@ impl CreateProductCommandHandler {
             saved_product.id().as_uuid().to_string(),
         );
 
+        let product_dto = ProductDto::from(&saved_product);
         self.message_publisher
-            .publish_created(ProductCreatedEvent::new(saved_product.clone()))?;
+            .publish_created(ProductCreatedEvent::new(saved_product))?;
 
-        Ok(ProductDto::from(saved_product))
+        Ok(product_dto)
     }
 }
 
@@ -109,7 +110,7 @@ impl UpdateProductCommandHandler {
     }
 
     // TODO: Add transactional outbox
-    pub async fn execute(&self, command: UpdateProductCommand) -> anyhow::Result<ProductDto> {
+    pub async fn execute(&self, command: UpdateProductCommand<'_>) -> anyhow::Result<ProductDto> {
         let category = self
             .category_repository
             .find_by_id(CategoryId::from_uuid(command.category_id()))?;
@@ -129,10 +130,11 @@ impl UpdateProductCommandHandler {
             saved_product.id().as_uuid().to_string(),
         );
 
+        let product_dto = ProductDto::from(&saved_product);
         self.message_publisher
-            .publish_updated(ProductUpdatedEvent::new(saved_product.clone()))?;
+            .publish_updated(ProductUpdatedEvent::new(saved_product))?;
 
-        Ok(ProductDto::from(saved_product))
+        Ok(product_dto)
     }
 }
 
@@ -157,7 +159,7 @@ impl DeleteProductCommandHandler {
         let product_id = ProductId::from_uuid(command.id());
 
         self.repository.delete(product_id)?;
-        tracing::info!("Product with id: {} deleted", command.id().to_string(),);
+        tracing::info!("Product with id: {} deleted", command.id().to_string());
 
         self.message_publisher
             .publish_deleted(ProductDeletedEvent::new(product_id))

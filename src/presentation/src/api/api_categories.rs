@@ -97,7 +97,7 @@ pub async fn create(
         .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
 
     let handler = CreateCategoryCommandHandler::new(state.category_repository.clone());
-    let command = CreateCategoryCommand::new(payload.title.clone(), payload.description.clone());
+    let command = CreateCategoryCommand::new(payload.title.as_str(), payload.description.as_str());
 
     let category = handler.execute(command).await?;
 
@@ -138,8 +138,8 @@ pub async fn update(
     let handler = UpdateCategoryCommandHandler::new(state.category_repository.clone());
     let command = UpdateCategoryCommand::new(
         id.into_inner(),
-        payload.title.clone(),
-        payload.description.clone(),
+        payload.title.as_str(),
+        payload.description.as_str(),
     );
 
     let category = handler.execute(command).await?;

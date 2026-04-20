@@ -105,8 +105,8 @@ pub async fn create(
     );
 
     let command = CreateProductCommand::new(
-        payload.title.clone(),
-        payload.description.clone(),
+        &payload.title,
+        &payload.description,
         payload.quantity,
         Decimal::from_f64(payload.price).expect("Invalid price value"),
         payload.category_id,
@@ -157,8 +157,8 @@ pub async fn update(
 
     let command = UpdateProductCommand::new(
         id.into_inner(),
-        payload.title.clone(),
-        payload.description.clone(),
+        &payload.title,
+        &payload.description,
         payload.quantity,
         Decimal::from_f64(payload.price).expect("Invalid price value"),
         payload.category_id,

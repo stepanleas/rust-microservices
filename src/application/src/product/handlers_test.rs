@@ -178,8 +178,8 @@ mod tests {
             .returning(|_| Ok(()));
 
         let command = CreateProductCommand::new(
-            "Laptop".to_string(),
-            "A high-performance laptop".to_string(),
+            "Laptop",
+            "A high-performance laptop",
             15,
             dec!(30.5),
             *category_id.as_uuid(),
@@ -231,8 +231,8 @@ mod tests {
         mock_message_publisher.expect_publish_created().never();
 
         let command = CreateProductCommand::new(
-            "Laptop".to_string(),
-            "A high-performance laptop".to_string(),
+            "Laptop",
+            "A high-performance laptop",
             15,
             dec!(30.5),
             *category_id.as_uuid(),
@@ -292,8 +292,8 @@ mod tests {
         mock_message_publisher.expect_publish_created().never();
 
         let command = CreateProductCommand::new(
-            "Laptop".to_string(),
-            "A high-performance laptop".to_string(),
+            "Laptop",
+            "A high-performance laptop",
             15,
             dec!(30.5),
             *category_id.as_uuid(),
@@ -362,8 +362,8 @@ mod tests {
             .returning(move |_| Err(anyhow::anyhow!("Failed to publish product created event",)));
 
         let command = CreateProductCommand::new(
-            "Laptop".to_string(),
-            "A high-performance laptop".to_string(),
+            "Laptop",
+            "A high-performance laptop",
             15,
             dec!(30.5),
             *category_id.as_uuid(),
@@ -435,8 +435,8 @@ mod tests {
 
         let command = UpdateProductCommand::new(
             product_id,
-            "Laptop".to_string(),
-            "A high-performance laptop".to_string(),
+            "Laptop",
+            "A high-performance laptop",
             15,
             dec!(30.5),
             category_id,

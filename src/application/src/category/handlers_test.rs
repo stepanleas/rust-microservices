@@ -103,10 +103,7 @@ mod tests {
 
         let handler = CreateCategoryCommandHandler::new(Arc::new(mock_repository));
 
-        let command = CreateCategoryCommand::new(
-            "Books".to_string(),
-            "A category for all book products".to_string(),
-        );
+        let command = CreateCategoryCommand::new("Books", "A category for all book products");
         let category_dto = handler.execute(command).await?;
 
         assert_eq!("Books", category_dto.title());
@@ -136,11 +133,8 @@ mod tests {
 
         let handler = UpdateCategoryCommandHandler::new(Arc::new(mock_repository));
 
-        let command = UpdateCategoryCommand::new(
-            category_id,
-            "Books".to_string(),
-            "A category for all book products".to_string(),
-        );
+        let command =
+            UpdateCategoryCommand::new(category_id, "Books", "A category for all book products");
         let category_dto = handler.execute(command).await?;
 
         assert_eq!(category_id, category_dto.id());

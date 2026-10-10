@@ -1,6 +1,67 @@
-[package]
-name = "restaurant"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "src/domain",
+    "src/infrastructure",
+    "src/application",
+    "src/presentation",
+    "src/messaging",
+    "src/starter"
+]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
+
+# Web
+actix-web = "4.15.0"
+validator = { version = "0.21.0", features = ["derive"] }
+
+# OpenAPI
+utoipa = { version = "5.5.0", features = ["actix_extras", "uuid", "chrono"] }
+utoipa-actix-web = "0.1.2"
+utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }
+
+# Serialization
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+# Database and ORM
+diesel = { version = "2.3.13", features = ["postgres", "r2d2", "uuid", "chrono", "numeric", "serde_json"] }
+diesel_migrations = "2.3.2"
+bigdecimal = "0.4"
+
+# Logging
+tracing = "0.1.44"
+tracing-actix-web = "0.7.22"
+env_logger = "0.11.11"
+
+# Configuration
+dotenv = "0.15.0"
+config = "0.15.25"
+
+# Error Handling
+anyhow = "1.0.104"
+thiserror = "2.0.20"
+
+# Testing
+testcontainers = "0.27.3"
+testcontainers-modules = { version = "0.15.0", features = ["postgres", "kafka"] }
+reqwest = { version = "0.13.5", features = ["json"]}
+serial_test = "4.0.1"
+mockall = "0.15.0"
+
+# Misc
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+readonly = "0.2.14"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
+futures = "0.3.34"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+# Money
+rust_decimal = { version = "1.43.0", features = ["macros"] }
+
+# Messaging
+kafka = "0.10.0"
+apache-avro = "0.22.0"
+
+# Shared
+shared = { git = "https://github.com/stepanleas/rust-shared.git", tag = "1.1.0" }

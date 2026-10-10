@@ -253,9 +253,9 @@ exponential backoff until Kafka is reachable.
 
 ```
 rust-microservices/
-├── catalog/ customer/ order/ payment/ restaurant/   one git submodule + Cargo workspace per service
-├── shared/          git submodule: the `shared` crate (2.0.0) used by every service
-├── api-gateway/     git submodule: the Rust (axum) API gateway
+├── catalog/ customer/ order/ payment/ restaurant/   one Cargo workspace per service
+├── shared/          the `shared` crate (2.0.0) used by every service
+├── api-gateway/     the Rust (axum) API gateway
 ├── .cargo/config.toml   patches the `shared` git dependency to ./shared for local builds
 ├── docker-compose/  development and production stacks, Kafka topic definitions
 └── scripts/         end-to-end saga test

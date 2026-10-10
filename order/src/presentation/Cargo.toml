@@ -1,0 +1,25 @@
+[package]
+name = "presentation"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-web.workspace = true
+validator.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+readonly.workspace = true
+uuid.workspace = true
+utoipa.workspace = true
+tracing.workspace = true
+rust_decimal.workspace = true
+shared = { workspace = true, features = ["web"] }
+
+application = { path = "../application" }
+domain = { path = "../domain" }
+
+[dev-dependencies]
+application = { path = "../application", features = ["mocks"] }
+anyhow.workspace = true
+mockall.workspace = true
+rusty-money.workspace = true

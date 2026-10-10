@@ -1,0 +1,19 @@
+[package]
+name = "messaging"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+shared = { workspace = true, features = ["contracts", "kafka", "outbox"] }
+rusty-money.workspace = true
+rust_decimal.workspace = true
+uuid.workspace = true
+
+domain = { path = "../domain" }
+application = { path = "../application" }
+
+[dev-dependencies]
+application = { path = "../application", features = ["mocks"] }
+serde_json.workspace = true

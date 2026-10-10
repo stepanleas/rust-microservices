@@ -1,0 +1,24 @@
+[package]
+name = "infrastructure"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uuid.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+diesel.workspace = true
+diesel_migrations.workspace = true
+chrono.workspace = true
+shared = { workspace = true, features = ["db", "outbox-postgres"] }
+rusty-money.workspace = true
+
+domain = { path = "../domain" }
+application = { path = "../application" }
+
+[dev-dependencies]
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+uuid.workspace = true

@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 uuid.workspace = true
 shared.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 rusty-money.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

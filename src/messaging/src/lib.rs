@@ -1,21 +1,10 @@
-use crate::event_handlers::KafkaEventHandlerFactory;
-use crate::kafka::consumer::KafkaConsumer;
-use crate::kafka::listener::KafkaMessageListener;
-use ::kafka::client::KafkaClient;
+//! Kafka adapters of the order service: the consumer side (one [`handlers::OrderMessageHandler`]
+//! for every consumed topic) and the outbox publisher.
 
-pub mod event_handlers;
-mod kafka;
-mod mappers;
-
-pub fn listen(
-    client: KafkaClient,
-    factory: KafkaEventHandlerFactory,
-    group_id: String,
-) -> anyhow::Result<()> {
-    let consumer = KafkaConsumer::new(client, group_id)?;
-    let kafka_listener = KafkaMessageListener::new(consumer, factory);
-
-    kafka_listener.listen();
-
-    Ok(())
-}
+pub mod handlers;
+#[cfg(test)]
+mod handlers_tests;
+pub mod mappers;
+pub mod publishers;
+#[cfg(test)]
+mod publishers_tests;

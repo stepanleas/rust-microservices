@@ -1,4 +1,4 @@
-use crate::entities::order::Order;
+use crate::aggregates::order::Order;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

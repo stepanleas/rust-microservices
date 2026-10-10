@@ -11,11 +11,15 @@ serde_json.workspace = true
 readonly.workspace = true
 uuid.workspace = true
 utoipa.workspace = true
-thiserror.workspace = true
-anyhow.workspace = true
 tracing.workspace = true
-futures.workspace = true
 rust_decimal.workspace = true
+shared = { workspace = true, features = ["web"] }
 
 application = { path = "../application" }
 domain = { path = "../domain" }
+
+[dev-dependencies]
+application = { path = "../application", features = ["mocks"] }
+anyhow.workspace = true
+mockall.workspace = true
+rusty-money.workspace = true

@@ -3,6 +3,9 @@ name = "application"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+mocks = ["dep:mockall", "shared/mocks"]
+
 [dependencies]
 serde.workspace = true
 uuid.workspace = true
@@ -10,10 +13,12 @@ anyhow.workspace = true
 rusty-money.workspace = true
 rust_decimal.workspace = true
 tracing.workspace = true
-tokio.workspace = true
-mockall.workspace = true
-shared.workspace = true
+mockall = { workspace = true, optional = true }
+chrono.workspace = true
+shared = { workspace = true, features = ["outbox"] }
 
 domain = { path = "../domain" }
 
 [dev-dependencies]
+mockall.workspace = true
+serde_json.workspace = true

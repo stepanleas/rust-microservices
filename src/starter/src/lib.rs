@@ -1,17 +1,13 @@
+pub mod config;
+pub mod wiring;
+
+use crate::config::Settings;
 use actix_web::dev::Server;
 use actix_web::middleware::Logger;
 use actix_web::web::Data;
 use actix_web::{App, HttpServer};
 use anyhow::Result;
-use application::settings::Settings;
-use infrastructure::category::postgres_category_repository::PostgresCategoryRepository;
-use infrastructure::product::postgres_product_repository::PostgresProductRepository;
-use kafka::client::KafkaClient;
-use messaging::kafka::producer::KafkaProducer;
-use messaging::kafka::publishers::ProductKafkaMessagePublisher;
-use presentation::app_state::AppState;
-use presentation::middleware::correlation_id::CorrelationIdMiddleware;
-use std::sync::Arc;
+use shared::web::CorrelationIdMiddleware;
 use tracing_actix_web::TracingLogger;
 use utoipa_actix_web::AppExt;
 use utoipa_swagger_ui::SwaggerUi;
@@ -24,18 +20,7 @@ async fn run_internal(settings: &Settings) -> Result<Server> {
     tracing::info!("Starting HTTP server at {}", settings.http_url);
     tracing::debug!("with configuration: {:?}", settings);
 
-    let pool = infrastructure::config::configure(settings.database_url.clone()).await?;
-    let mut kafka_client = KafkaClient::new(vec![settings.kafka_host.to_owned()]);
-    kafka_client.load_metadata_all()?;
-
-    let app_state = AppState {
-        settings: settings.clone(),
-        category_repository: Arc::new(PostgresCategoryRepository::new(&pool)),
-        product_repository: Arc::new(PostgresProductRepository::new(&pool)),
-        product_message_publisher: Arc::new(ProductKafkaMessagePublisher::new(KafkaProducer::new(
-            kafka_client,
-        )?)),
-    };
+    let app_state = wiring::build_app_state(settings)?;
 
     let server = HttpServer::new(move || {
         App::new()
@@ -44,7 +29,7 @@ async fn run_internal(settings: &Settings) -> Result<Server> {
             .into_utoipa_app()
             .openapi(presentation::api::docs::open_api_docs())
             .map(|app| app.wrap(Logger::default()))
-            .map(|app| app.configure(presentation::config::configure))
+            .map(|app| app.configure(presentation::api::configure))
             .openapi_service(|api| {
                 SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", api)
             })

@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1.93 as chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.98.1 as chef
 WORKDIR /app
 
 FROM chef AS planner
@@ -15,7 +15,7 @@ RUN cargo build -p starter --release
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates libpq5 curl \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*

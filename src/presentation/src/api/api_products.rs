@@ -1,43 +1,40 @@
-use crate::app_state::AppState;
-use crate::error::ApiError;
-use crate::requests::product_requests::{CreateProductRequest, UpdateProductRequest};
-use crate::responses::product_responses::ProductResponse;
-use crate::validation::ValidatedJson;
+use crate::api::correlation_id;
+use crate::dto::requests::{CreateProductRequest, UpdateProductRequest};
+use crate::dto::responses::{DataResponse, ProductResponse};
+use crate::state::AppState;
 use actix_web::web::Path;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, Responder, delete, get, post, put, web};
-use anyhow::anyhow;
-use application::product::commands::{
-    CreateProductCommand, DeleteProductCommand, UpdateProductCommand,
-};
-use application::product::handlers::{
-    CreateProductCommandHandler, DeleteProductCommandHandler, FindProductQueryHandler,
-    ListAllProductQueryHandler, UpdateProductCommandHandler,
-};
-use application::product::queries::FindProductQuery;
+use actix_web::{HttpRequest, HttpResponse, Responder, delete, get, post, put, web};
+use application::commands::{CreateProductCommand, DeleteProductCommand, UpdateProductCommand};
+use application::queries::FindProductQuery;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::json;
+use shared::web::{ApiError, ErrorResponse, ValidatedJson, blocking};
 use uuid::Uuid;
 
 const PRODUCTS: &str = "Products";
 
+fn to_decimal(price: f64) -> Result<Decimal, ApiError> {
+    Decimal::from_f64(price).ok_or_else(|| ApiError::bad_request("Invalid price value"))
+}
+
+/// List products
+///
+/// Returns every product in the catalog together with its category.
 #[utoipa::path(
     tag = PRODUCTS,
     operation_id = "list_all_products",
     responses(
-        (status = 200, description = "List current product items", body = [ProductResponse])
+        (status = 200, description = "List of products", body = DataResponse<Vec<ProductResponse>>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
 #[get("")]
-pub async fn list_all(req: HttpRequest) -> Result<impl Responder, ApiError> {
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
+pub async fn list_all(state: web::Data<AppState>) -> Result<impl Responder, ApiError> {
+    let use_case = state.list_products.clone();
+    let products = blocking(move || use_case.execute()).await?;
 
-    let handler = ListAllProductQueryHandler::new(state.product_repository.clone());
-
-    let categories = handler.execute().await?;
-    let data = categories
+    let data = products
         .into_iter()
         .map(ProductResponse::from)
         .collect::<Vec<ProductResponse>>();
@@ -45,162 +42,142 @@ pub async fn list_all(req: HttpRequest) -> Result<impl Responder, ApiError> {
     Ok(HttpResponse::Ok().json(json!({ "data": data })))
 }
 
+/// Get a product
 #[utoipa::path(
     tag = PRODUCTS,
     operation_id = "find_product_by_id",
     responses(
-        (status = 200, description = "Get product item by id", body = [ProductResponse])
+        (status = 200, description = "The product", body = DataResponse<ProductResponse>),
+        (status = 404, description = "Product not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     ),
     params(
         ("id" = Uuid, Path, description = "Id of the product item")
     ),
 )]
 #[get("/{id}")]
-pub async fn find_one(req: HttpRequest, id: Path<Uuid>) -> Result<impl Responder, ApiError> {
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
-
-    let handler = FindProductQueryHandler::new(state.product_repository.clone());
-
-    let product = handler
-        .execute(FindProductQuery::new(Some(id.into_inner())))
-        .await?;
+pub async fn find_one(
+    state: web::Data<AppState>,
+    id: Path<Uuid>,
+) -> Result<impl Responder, ApiError> {
+    let use_case = state.find_product.clone();
+    let query = FindProductQuery::new(id.into_inner());
+    let product = blocking(move || use_case.execute(query)).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "data": ProductResponse::from(product) })))
 }
 
-#[tracing::instrument(skip(req))]
+/// Create a product
+///
+/// Persists the product and publishes a `product-created` event to Kafka.
+#[tracing::instrument(skip(req, state))]
 #[utoipa::path(
     tag = PRODUCTS,
     operation_id = "create_product",
     responses(
-        (status = 201, description = "Create a product item", body = [ProductResponse])
+        (status = 201, description = "Product created", body = DataResponse<ProductResponse>),
+        (status = 400, description = "Malformed JSON or request validation failed", body = ErrorResponse),
+        (status = 404, description = "Category not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     ),
     request_body = CreateProductRequest,
 )]
 #[post("")]
 pub async fn create(
     req: HttpRequest,
+    state: web::Data<AppState>,
     request: ValidatedJson<CreateProductRequest>,
 ) -> Result<impl Responder, ApiError> {
-    let correlation_id = req
-        .extensions()
-        .get::<String>()
-        .cloned()
-        .unwrap_or("unknown".to_string());
-
+    let correlation_id = correlation_id(&req);
     tracing::info!(%correlation_id, "Handling product create");
 
     let payload = request.into_inner();
-
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
-
-    let handler = CreateProductCommandHandler::new(
-        state.product_repository.clone(),
-        state.category_repository.clone(),
-        state.product_message_publisher.clone(),
-    );
-
     let command = CreateProductCommand::new(
-        &payload.title,
-        &payload.description,
+        payload.title.clone(),
+        payload.description.clone(),
         payload.quantity,
-        Decimal::from_f64(payload.price).expect("Invalid price value"),
+        to_decimal(payload.price)?,
         payload.category_id,
     );
 
-    let product = handler.execute(command).await?;
+    let use_case = state.create_product.clone();
+    let product = blocking(move || use_case.execute(command)).await?;
 
     Ok(HttpResponse::Created().json(json!({ "data": ProductResponse::from(product) })))
 }
 
-#[tracing::instrument(skip(req))]
+/// Update a product
+///
+/// Updates the product and publishes a `product-updated` event to Kafka.
+#[tracing::instrument(skip(req, state))]
 #[utoipa::path(
     tag = PRODUCTS,
     operation_id = "update_product",
     responses(
-        (status = 200, description = "Update a product item", body = [ProductResponse])
+        (status = 200, description = "Product updated", body = DataResponse<ProductResponse>),
+        (status = 400, description = "Malformed JSON or request validation failed", body = ErrorResponse),
+        (status = 404, description = "Product or category not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     ),
     params(
-        ("id", description = "Id of the product item to update")
+        ("id" = Uuid, Path, description = "Id of the product item to update")
     ),
     request_body = UpdateProductRequest,
 )]
 #[put("/{id}")]
 pub async fn update(
     req: HttpRequest,
+    state: web::Data<AppState>,
     id: Path<Uuid>,
     request: ValidatedJson<UpdateProductRequest>,
 ) -> Result<impl Responder, ApiError> {
-    let correlation_id = req
-        .extensions()
-        .get::<String>()
-        .cloned()
-        .unwrap_or("unknown".to_string());
-
+    let correlation_id = correlation_id(&req);
     tracing::info!(%correlation_id, "Handling product update");
 
     let payload = request.into_inner();
-
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
-
-    let handler = UpdateProductCommandHandler::new(
-        state.product_repository.clone(),
-        state.category_repository.clone(),
-        state.product_message_publisher.clone(),
-    );
-
     let command = UpdateProductCommand::new(
         id.into_inner(),
-        &payload.title,
-        &payload.description,
+        payload.title.clone(),
+        payload.description.clone(),
         payload.quantity,
-        Decimal::from_f64(payload.price).expect("Invalid price value"),
+        to_decimal(payload.price)?,
         payload.category_id,
     );
 
-    let product = handler.execute(command).await?;
+    let use_case = state.update_product.clone();
+    let product = blocking(move || use_case.execute(command)).await?;
 
-    Ok(HttpResponse::Created().json(json!({ "data": ProductResponse::from(product) })))
+    Ok(HttpResponse::Ok().json(json!({ "data": ProductResponse::from(product) })))
 }
 
-#[tracing::instrument(skip(req))]
+/// Delete a product
+///
+/// Deletes the product and publishes a `product-deleted` event to Kafka.
+#[tracing::instrument(skip(req, state))]
 #[utoipa::path(
     tag = PRODUCTS,
     operation_id = "delete_product",
     responses(
-        (status = 204, description = "Delete a product item", body = [ProductResponse])
+        (status = 204, description = "Product deleted"),
+        (status = 404, description = "Product not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     ),
     params(
-        ("id", description = "Id of the product item to delete")
+        ("id" = Uuid, Path, description = "Id of the product item to delete")
     )
 )]
 #[delete("/{id}")]
-pub async fn delete(req: HttpRequest, id: Path<Uuid>) -> Result<impl Responder, ApiError> {
-    let correlation_id = req
-        .extensions()
-        .get::<String>()
-        .cloned()
-        .unwrap_or("unknown".to_string());
-
+pub async fn destroy(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    id: Path<Uuid>,
+) -> Result<impl Responder, ApiError> {
+    let correlation_id = correlation_id(&req);
     tracing::info!(%correlation_id, "Handling product delete");
 
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
-
-    let handler = DeleteProductCommandHandler::new(
-        state.product_repository.clone(),
-        state.product_message_publisher.clone(),
-    );
+    let use_case = state.delete_product.clone();
     let command = DeleteProductCommand::new(id.into_inner());
-
-    handler.execute(command).await?;
+    blocking(move || use_case.execute(command)).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }

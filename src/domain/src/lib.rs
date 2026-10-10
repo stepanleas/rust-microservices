@@ -1,5 +1,3 @@
-pub mod category;
-pub mod enums;
+pub mod aggregates;
 pub mod error;
 pub mod events;
-pub mod product;

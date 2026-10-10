@@ -5,3 +5,6 @@ mod info_api_doc;
 mod product_api_doc;
 
 pub use api_doc::open_api_docs;
+
+#[cfg(test)]
+mod api_doc_tests;

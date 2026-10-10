@@ -1,4 +1,4 @@
-use crate::product::entity::Product;
+use crate::aggregates::product::Product;
 use chrono::{DateTime, Utc};
 use shared::domain::value_objects::ProductId;
 use uuid::Uuid;

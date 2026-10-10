@@ -1,5 +1,5 @@
 use crate::api::api_categories::__path_create;
-use crate::api::api_categories::__path_delete;
+use crate::api::api_categories::__path_destroy;
 use crate::api::api_categories::__path_find_one;
 use crate::api::api_categories::__path_list_all;
 use crate::api::api_categories::__path_update;
@@ -16,7 +16,7 @@ use utoipa::OpenApi;
         find_one,
         create,
         update,
-        delete,
+        destroy,
     )
 )]
 pub(crate) struct CategoryApiDoc;

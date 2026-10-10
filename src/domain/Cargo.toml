@@ -7,6 +7,5 @@ edition = "2024"
 uuid.workspace = true
 shared.workspace = true
 thiserror.workspace = true
-anyhow.workspace = true
 chrono.workspace = true
 rusty-money.workspace = true

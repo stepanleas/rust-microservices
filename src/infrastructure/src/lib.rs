@@ -1,9 +1,8 @@
-use diesel::r2d2::ConnectionManager;
-use diesel::{PgConnection, r2d2};
+use diesel_migrations::{EmbeddedMigrations, embed_migrations};
 
-pub mod category;
-pub mod config;
-pub mod product;
+pub mod postgres;
 pub mod schema;
 
-pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+pub use shared::db::DbPool;
+
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/migrations");

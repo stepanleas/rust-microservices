@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "PaymentResponseAvroModel",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "saga_id", "type": "string" },
+    { "name": "payment_id", "type": "string" },
+    { "name": "order_id", "type": "string" },
+    { "name": "customer_id", "type": "string" },
+    { "name": "price", "type": "string" },
+    { "name": "payment_status", "type": "string" },
+    { "name": "failure_messages", "type": { "type": "array", "items": "string" } },
+    { "name": "created_at", "type": "string" }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "CustomerCreatedEventAvroModel",
+  "fields": [
+    { "name": "id", "type": "string" },
+    {
+      "name": "customer",
+      "type": {
+        "type": "record",
+        "name": "Customer",
+        "fields": [
+          { "name": "id", "type": "string" },
+          { "name": "user_name", "type": "string" },
+          { "name": "first_name", "type": "string" },
+          { "name": "last_name", "type": "string" }
+        ]
+      }
+    },
+    { "name": "created_at", "type": "string" }
+  ]
+}

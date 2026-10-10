@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "name": "RestaurantApprovalRequestAvroModel",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "saga_id", "type": "string" },
+    { "name": "order_id", "type": "string" },
+    { "name": "customer_id", "type": "string" },
+    { "name": "price", "type": "string" },
+    {
+      "name": "products",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "RestaurantApprovalProduct",
+          "fields": [
+            { "name": "id", "type": "string" },
+            { "name": "quantity", "type": "int" }
+          ]
+        }
+      }
+    },
+    { "name": "created_at", "type": "string" }
+  ]
+}

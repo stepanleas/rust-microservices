@@ -1,0 +1,9 @@
+{
+  "type": "record",
+  "name": "ProductDeletedEventAvroModel",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "product_id", "type": "string" },
+    { "name": "created_at", "type": "string" }
+  ]
+}

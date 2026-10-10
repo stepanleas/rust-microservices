@@ -1,141 +1,51 @@
-use bigdecimal::BigDecimal;
-use num_traits::{FromPrimitive, ToPrimitive};
 use std::fmt;
-use std::ops::{Add, Mul, Sub};
 use uuid::Uuid;
 
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
-pub struct OrderId(Uuid);
+/// Declares a typed id wrapping a [`Uuid`], so ids of different entities cannot be mixed up.
+macro_rules! typed_id {
+    ($($name:ident),+ $(,)?) => {$(
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+        pub struct $name(Uuid);
 
-impl OrderId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
+        impl $name {
+            pub fn new() -> Self {
+                Self(Uuid::new_v4())
+            }
 
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
+            pub fn from_uuid(uuid: Uuid) -> Self {
+                Self(uuid)
+            }
 
-    pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
-        Ok(Self(Uuid::parse_str(s)?))
-    }
+            #[allow(clippy::should_implement_trait)]
+            pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
+                Ok(Self(Uuid::parse_str(s)?))
+            }
 
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
+            pub fn as_uuid(&self) -> &Uuid {
+                &self.0
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = uuid::Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(Self(Uuid::parse_str(s)?))
+            }
+        }
+
+        impl From<$name> for Uuid {
+            fn from(id: $name) -> Self {
+                id.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+    )+};
 }
 
-impl Into<Uuid> for OrderId {
-    fn into(self) -> Uuid {
-        self.0
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
-pub struct OrderItemId(Uuid);
-
-impl OrderItemId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
-        Ok(Self(Uuid::parse_str(s)?))
-    }
-
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
-}
-
-impl Into<Uuid> for OrderItemId {
-    fn into(self) -> Uuid {
-        self.0
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
-pub struct CustomerId(Uuid);
-
-impl CustomerId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
-        Ok(Self(Uuid::parse_str(s)?))
-    }
-
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
-}
-
-impl Into<Uuid> for CustomerId {
-    fn into(self) -> Uuid {
-        self.0
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
-pub struct ProductId(Uuid);
-
-impl ProductId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
-        Ok(Self(Uuid::parse_str(s)?))
-    }
-
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
-}
-
-impl Into<Uuid> for ProductId {
-    fn into(self) -> Uuid {
-        self.0
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
-pub struct CategoryId(Uuid);
-
-impl CategoryId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
-        Ok(Self(Uuid::parse_str(s)?))
-    }
-
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
-}
-
-impl Into<Uuid> for CategoryId {
-    fn into(self) -> Uuid {
-        self.0
-    }
-}
-
+typed_id!(OrderId, OrderItemId, CustomerId, ProductId, CategoryId);

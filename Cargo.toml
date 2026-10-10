@@ -1,10 +1,44 @@
 [package]
 name = "shared"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2024"
 
+[features]
+default = []
+# Avro schemas and models of every Kafka message exchanged between the services.
+contracts = ["dep:apache-avro", "dep:serde"]
+# Transactional outbox: message model, ports and relay.
+outbox = ["dep:serde", "dep:serde_json", "dep:chrono", "dep:tracing"]
+# Postgres (diesel) implementation of the outbox repository.
+outbox-postgres = ["outbox", "db"]
+# Diesel r2d2 pool + embedded migrations.
+db = ["dep:diesel", "dep:diesel_migrations"]
+# Kafka producer, consumer and a listener with retries and a dead letter topic.
+kafka = ["dep:kafka", "dep:tracing"]
+# actix-web building blocks: error responses, validated JSON, correlation id, blocking helper.
+web = ["dep:actix-web", "dep:utoipa", "dep:validator", "dep:serde", "dep:serde_json", "dep:futures", "dep:tracing"]
+# mockall mocks of the outbox ports, for the services' unit tests.
+mocks = ["dep:mockall", "outbox"]
+
 [dependencies]
-num-traits = "0.2.19"
-bigdecimal = "0.4.8"
-anyhow = "1.0.100"
-uuid = { version = "1.18.1", features = ["v4"] }
+anyhow = "1.0.104"
+thiserror = "2.0.20"
+uuid = { version = "1.26.1", features = ["v4"] }
+
+apache-avro = { version = "0.22.0", optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+serde_json = { version = "1.0.151", optional = true }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"], optional = true }
+tracing = { version = "0.1.44", optional = true }
+diesel = { version = "2.3.13", features = ["postgres", "r2d2", "uuid", "chrono", "serde_json"], optional = true }
+diesel_migrations = { version = "2.3.2", optional = true }
+kafka = { version = "0.10.0", optional = true }
+actix-web = { version = "4.15.0", optional = true }
+utoipa = { version = "5.5.0", optional = true }
+validator = { version = "0.21.0", features = ["derive"], optional = true }
+futures = { version = "0.3.34", optional = true }
+mockall = { version = "0.15.0", optional = true }
+
+[[example]]
+name = "fail_payment"
+required-features = ["contracts", "kafka", "outbox"]

@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "PaymentRequestAvroModel",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "saga_id", "type": "string" },
+    { "name": "order_id", "type": "string" },
+    { "name": "customer_id", "type": "string" },
+    { "name": "price", "type": "string" },
+    { "name": "created_at", "type": "string" }
+  ]
+}

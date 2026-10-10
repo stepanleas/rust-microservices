@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "RestaurantApprovalResponseAvroModel",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "saga_id", "type": "string" },
+    { "name": "order_id", "type": "string" },
+    { "name": "order_approval_status", "type": "string" },
+    { "name": "failure_messages", "type": { "type": "array", "items": "string" } },
+    { "name": "created_at", "type": "string" }
+  ]
+}

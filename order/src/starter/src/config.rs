@@ -22,6 +22,12 @@ fn var(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_string())
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn parsed<T: FromStr>(name: &str, default: T) -> T {
     env::var(name)
         .ok()

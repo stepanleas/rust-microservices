@@ -256,7 +256,7 @@ rust-microservices/
 ├── catalog/ customer/ order/ payment/ restaurant/   one Cargo workspace per service
 ├── shared/          the `shared` crate (2.0.0) used by every service
 ├── api-gateway/     the Rust (axum) API gateway
-├── .cargo/config.toml   patches the `shared` git dependency to ./shared for local builds
+├── .github/workflows/   CI (fmt, clippy, tests per changed crate) and per-service image releases
 ├── docker-compose/  development and production stacks, Kafka topic definitions
 └── scripts/         end-to-end saga test
 ```
@@ -296,11 +296,31 @@ HTTP controllers only map DTOs and run a use case on the blocking thread pool
 | `web`             | `ApiError`, `ErrorResponse`, `ValidatedJson`, correlation id middleware, `blocking()` | presentation |
 | `mocks`           | mockall mocks of the shared ports                                             | tests          |
 
-The services depend on it by git tag
-(`shared = { git = "https://github.com/stepanleas/rust-shared.git", tag = "2.0.0" }`), so a
-standalone clone or a Docker build of one service fetches the tagged version. Inside this checkout
-the root `.cargo/config.toml` patches that dependency to `./shared`, so a change to `shared` can
-be built and tested against every service before it is tagged and pushed.
+The services depend on it by path (`shared = { path = "../shared" }`), so a change to `shared` is
+built and tested against every service in the same commit; there is no separate version to tag.
+Because of that, the Docker images are built with the repository root as context:
+
+```bash
+docker build -f order/Dockerfile -t artellas/rust-order:1.4.0 .
+```
+
+---
+
+## CI/CD
+
+GitHub Actions runs from the root `.github/workflows/`:
+
+* **`ci.yml`** (pushes to `main`, `feature/*`, `fix/*` and PRs to `main`) runs `cargo fmt --check`,
+  `cargo clippy -D warnings` and `cargo test` for each crate whose directory changed. A change to
+  `shared/` checks every crate.
+* **`release.yml`** releases one service per tag `<service>-v<semver>`:
+
+  ```bash
+  git tag order-v1.4.0 && git push origin order-v1.4.0
+  ```
+
+  builds `order/Dockerfile` and pushes `artellas/rust-order:1.4.0`, `:1.4`, `:1` and `:latest` (needs the
+  `DOCKER_USERNAME` / `DOCKER_PASSWORD` repository secrets).
 
 ---
 

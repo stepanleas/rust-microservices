@@ -1,5 +1,0 @@
-# Builds run from inside this checkout use the local `shared` directory instead of the git tag,
-# so a change to it can be tested across all services before it is tagged and pushed.
-# Docker builds and standalone clones of a service do not see this file.
-[patch."https://github.com/stepanleas/rust-shared.git"]
-shared = { path = "shared" }

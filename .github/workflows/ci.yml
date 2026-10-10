@@ -1,0 +1,100 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - feature/*
+      - fix/*
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Picks the crates touched by the push/PR. A change to `shared` (or to this workflow)
+  # re-checks every crate, since all of them build against the local `shared` directory.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      crates: ${{ steps.crates.outputs.crates }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            all:
+              - "shared/**"
+              - ".github/workflows/ci.yml"
+            catalog: "catalog/**"
+            customer: "customer/**"
+            order: "order/**"
+            restaurant: "restaurant/**"
+            payment: "payment/**"
+            api-gateway: "api-gateway/**"
+
+      - name: Build crate list
+        id: crates
+        env:
+          ALL: ${{ steps.filter.outputs.all }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+        run: |
+          if [ "$ALL" = "true" ]; then
+            crates='["shared","catalog","customer","order","restaurant","payment","api-gateway"]'
+          else
+            crates=$(echo "$CHANGED" | jq -c 'map(select(. != "all"))')
+          fi
+          echo "crates=$crates" >> "$GITHUB_OUTPUT"
+          echo "Crates to check: $crates"
+
+  check:
+    needs: changes
+    if: needs.changes.outputs.crates != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJSON(needs.changes.outputs.crates) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.crate }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system libraries
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpq-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }} -> target
+          key: ${{ matrix.crate }}
+
+      - name: Check code style
+        run: cargo fmt --all -- --check
+
+      - name: Check code
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      # Integration tests use testcontainers, which talk to the runner's Docker daemon.
+      - name: Tests
+        run: cargo test --workspace --all-features -- --nocapture

@@ -7,7 +7,7 @@ build_images:
 	for service in $(services); do \
 		( \
 			echo "==== Building $$service ===="; \
-			cd $$service && docker build -t artellas/rust-$$service:$(version) . && cd - > /dev/null; \
+			docker build -f $$service/Dockerfile -t artellas/rust-$$service:$(version) .; \
 		) & \
 	done; \
 	wait; \

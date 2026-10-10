@@ -1,0 +1,23 @@
+[package]
+name = "application"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+mocks = ["dep:mockall", "shared/mocks"]
+
+[dependencies]
+serde.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+mockall = { workspace = true, optional = true }
+tracing.workspace = true
+rust_decimal.workspace = true
+shared = { workspace = true, features = ["outbox"] }
+
+domain = { path = "../domain" }
+
+[dev-dependencies]
+mockall.workspace = true
+shared = { workspace = true, features = ["outbox", "mocks"] }

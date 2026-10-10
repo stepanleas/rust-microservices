@@ -3,6 +3,7 @@ name: release
 # Each service is released on its own by pushing a tag `<service>-v<semver>`, e.g.
 #   git tag order-v1.4.0 && git push origin order-v1.4.0
 # which publishes artellas/rust-order:1.4.0, :1.4, :1 and :latest.
+# An existing tag can be (re)released from Actions -> release -> Run workflow.
 on:
   push:
     tags:
@@ -12,6 +13,12 @@ on:
       - "restaurant-v*"
       - "payment-v*"
       - "api-gateway-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. order-v1.0.0"
+        required: true
+        type: string
 
 jobs:
   release:
@@ -20,13 +27,24 @@ jobs:
     steps:
       - name: Parse tag
         id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          echo "service=${tag%-v*}" >> "$GITHUB_OUTPUT"
-          echo "version=${tag##*-v}" >> "$GITHUB_OUTPUT"
+          service="${TAG%-v*}"
+          version="${TAG##*-v}"
+          case "$service" in
+            catalog|customer|order|restaurant|payment|api-gateway) ;;
+            *) echo "::error::'$TAG' is not a <service>-v<semver> tag"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # Builds the tagged code, also when started manually from another branch.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
 
       - name: Docker meta
         id: meta

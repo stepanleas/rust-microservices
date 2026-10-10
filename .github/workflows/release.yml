@@ -49,6 +49,8 @@ jobs:
 
   release:
     needs: tags
+    # DOCKER_USERNAME and DOCKER_PASSWORD (a Docker Hub access token) are secrets of this environment.
+    environment: Rust Microservices
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:

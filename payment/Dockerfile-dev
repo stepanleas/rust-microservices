@@ -1,0 +1,8 @@
+FROM lukemathwalker/cargo-chef:latest-rust-1.98.1
+
+WORKDIR /app
+
+RUN apt-get update && cargo install cargo-watch
+
+CMD ["cargo", "watch", "-x", "run -p starter"]
+

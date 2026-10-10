@@ -3,7 +3,7 @@ name: release
 # Each service is released on its own by pushing a tag `<service>-v<semver>`, e.g.
 #   git tag order-v1.4.0 && git push origin order-v1.4.0
 # which publishes artellas/rust-order:1.4.0, :1.4, :1 and :latest.
-# An existing tag can be (re)released from Actions -> release -> Run workflow.
+# Existing tags can be (re)released from Actions -> release -> Run workflow.
 on:
   push:
     tags:
@@ -15,36 +15,60 @@ on:
       - "api-gateway-v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Existing tag to release, e.g. order-v1.0.0"
+      tags:
+        description: "Existing tags to release, separated by spaces or commas, e.g. order-v1.0.0 payment-v1.0.0"
         required: true
         type: string
 
 jobs:
+  # Turns the pushed tag, or the tags typed in the manual run, into the release matrix.
+  tags:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.parse.outputs.tags }}
+    steps:
+      - name: Parse tags
+        id: parse
+        env:
+          TAGS: ${{ inputs.tags || github.ref_name }}
+        run: |
+          tags=()
+          for tag in ${TAGS//,/ }; do
+            case "${tag%-v*}" in
+              catalog|customer|order|restaurant|payment|api-gateway) ;;
+              *) echo "::error::'$tag' is not a <service>-v<semver> tag"; exit 1 ;;
+            esac
+            tags+=("$tag")
+          done
+          if [ ${#tags[@]} -eq 0 ]; then
+            echo "::error::no tags given"; exit 1
+          fi
+          json=$(printf '%s\n' "${tags[@]}" | sort -u | jq -R . | jq -cs .)
+          echo "tags=$json" >> "$GITHUB_OUTPUT"
+          echo "Releasing: $json"
+
   release:
+    needs: tags
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.tags.outputs.tags) }}
     steps:
       - name: Parse tag
         id: tag
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ matrix.tag }}
         run: |
-          service="${TAG%-v*}"
-          version="${TAG##*-v}"
-          case "$service" in
-            catalog|customer|order|restaurant|payment|api-gateway) ;;
-            *) echo "::error::'$TAG' is not a <service>-v<semver> tag"; exit 1 ;;
-          esac
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "service=$service" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "service=${TAG%-v*}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG##*-v}" >> "$GITHUB_OUTPUT"
 
       # Builds the tagged code, also when started manually from another branch.
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          ref: refs/tags/${{ matrix.tag }}
 
       - name: Docker meta
         id: meta

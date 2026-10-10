@@ -1,32 +1,36 @@
-version: '3.8'
-
 services:
   catalog:
     build:
       context: ../../catalog
       dockerfile: Dockerfile-dev
-    image: rust-catalog:dev
+    image: artellas/rust-catalog:dev
     container_name: catalog-container
     environment:
       ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
+      HTTP_URL: 0.0.0.0:8080
+      SERVICE_NAME: catalog_api
+      DATABASE_URL: postgres://postgres:postgres@catalog-db:5432/catalog_db
+      KAFKA_HOST: kafka:29092
+      CARGO_TARGET_DIR: /app/target
     ports:
       - "8080:8080"
     depends_on:
       catalog-db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://0.0.0.0:8080/api/health/ready | grep '\"status\":\"Ok\"' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    networks:
-      - rust-microservices-network
+      kafka-init:
+        condition: service_completed_successfully
     volumes:
       - ../../catalog:/app
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/catalog:/app/target
+      - ../../volumes/catalog-target:/app/target
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8080/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    networks:
+      - rust-microservices-network
 
   catalog-db:
     image: postgres:18-alpine
@@ -37,42 +41,49 @@ services:
       POSTGRES_DB: catalog_db
     ports:
       - "5432:5432"
-    networks:
-      - rust-microservices-network
     volumes:
-      - catalog-db:/var/lib/postgresql/data
+      - catalog-db:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "PGPASSWORD=postgres pg_isready -U postgres -h catalog-db" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d catalog_db" ]
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   order:
     build:
       context: ../../order
       dockerfile: Dockerfile-dev
-    image: rust-order:dev
+    image: artellas/rust-order:dev
     container_name: order-container
     environment:
-      APP_ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
+      ENVIRONMENT: development
+      HTTP_URL: 0.0.0.0:8081
+      SERVICE_NAME: order_api
+      DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_db
+      KAFKA_HOST: kafka:29092
+      CARGO_TARGET_DIR: /app/target
+      OUTBOX_POLL_INTERVAL_MS: 1000
     ports:
       - "8081:8081"
     depends_on:
-      catalog-db:
+      order-db:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ../../order:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/order-target:/app/target
     healthcheck:
       test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8081/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 60
+      start_period: 60s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../order:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/order:/app/target
 
   order-db:
     image: postgres:18-alpine
@@ -83,42 +94,48 @@ services:
       POSTGRES_DB: order_db
     ports:
       - "5433:5432"
-    networks:
-      - rust-microservices-network
     volumes:
-      - order-db:/var/lib/postgresql/data
+      - order-db:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "PGPASSWORD=postgres pg_isready -U postgres -h order-db" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d order_db" ]
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
 
   customer:
     build:
-      context: ../../order
+      context: ../../customer
       dockerfile: Dockerfile-dev
-    image: rust-customer:dev
+    image: artellas/rust-customer:dev
     container_name: customer-container
     environment:
-      APP_ENVIRONMENT: development
-      RUST_LOG: debug,kafka=warn
+      ENVIRONMENT: development
+      HTTP_URL: 0.0.0.0:8082
+      SERVICE_NAME: customer_api
+      DATABASE_URL: postgres://postgres:postgres@customer-db:5432/customer_db
+      KAFKA_HOST: kafka:29092
+      CARGO_TARGET_DIR: /app/target
     ports:
       - "8082:8082"
     depends_on:
-      catalog-db:
+      customer-db:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ../../customer:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/customer-target:/app/target
     healthcheck:
       test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8082/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 60
+      start_period: 60s
     networks:
       - rust-microservices-network
-    volumes:
-      - ../../customer:/app
-      - ../../volumes/cargo-registry:/usr/local/cargo/registry
-      - ../../volumes/customer:/app/target
 
   customer-db:
     image: postgres:18-alpine
@@ -129,21 +146,130 @@ services:
       POSTGRES_DB: customer_db
     ports:
       - "5434:5432"
-    networks:
-      - rust-microservices-network
     volumes:
-      - customer-db:/var/lib/postgresql/data
+      - customer-db:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "PGPASSWORD=postgres pg_isready -U postgres -h customer-db" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d customer_db" ]
       interval: 10s
       timeout: 30s
       retries: 15
+    networks:
+      - rust-microservices-network
+
+  restaurant:
+    build:
+      context: ../../restaurant
+      dockerfile: Dockerfile-dev
+    image: artellas/rust-restaurant:dev
+    container_name: restaurant-container
+    environment:
+      ENVIRONMENT: development
+      HTTP_URL: 0.0.0.0:8083
+      SERVICE_NAME: restaurant_api
+      DATABASE_URL: postgres://postgres:postgres@restaurant-db:5432/restaurant_db
+      KAFKA_HOST: kafka:29092
+      CARGO_TARGET_DIR: /app/target
+      OUTBOX_POLL_INTERVAL_MS: 1000
+    ports:
+      - "8083:8083"
+    depends_on:
+      restaurant-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ../../restaurant:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/restaurant-target:/app/target
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8083/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    networks:
+      - rust-microservices-network
+
+  restaurant-db:
+    image: postgres:18-alpine
+    container_name: restaurant-db-container
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: restaurant_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - restaurant-db:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d restaurant_db" ]
+      interval: 10s
+      timeout: 30s
+      retries: 15
+    networks:
+      - rust-microservices-network
+
+  payment:
+    build:
+      context: ../../payment
+      dockerfile: Dockerfile-dev
+    image: artellas/rust-payment:dev
+    container_name: payment-container
+    environment:
+      ENVIRONMENT: development
+      HTTP_URL: 0.0.0.0:8084
+      SERVICE_NAME: payment_api
+      DATABASE_URL: postgres://postgres:postgres@payment-db:5432/payment_db
+      KAFKA_HOST: kafka:29092
+      CARGO_TARGET_DIR: /app/target
+      OUTBOX_POLL_INTERVAL_MS: 1000
+    ports:
+      - "8084:8084"
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ../../payment:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/payment-target:/app/target
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8084/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    networks:
+      - rust-microservices-network
+
+  payment-db:
+    image: postgres:18-alpine
+    container_name: payment-db-container
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: payment_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - payment-db:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d payment_db" ]
+      interval: 10s
+      timeout: 30s
+      retries: 15
+    networks:
+      - rust-microservices-network
 
   api-gateway:
-    image: artellas/rust-spring-boot-api-gateway:1
+    build:
+      context: ../../api-gateway
+      dockerfile: Dockerfile-dev
+    image: artellas/rust-api-gateway:dev
     container_name: api-gateway-container
     ports:
-      - "8072:8072"
+      - "8070:8070"
     depends_on:
       catalog:
         condition: service_healthy
@@ -151,11 +277,34 @@ services:
         condition: service_healthy
       order:
         condition: service_healthy
+      restaurant:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
     environment:
-      SPRING_APPLICATION_NAME: api-gateway
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: "http://keycloak:8080/realms/master/protocol/openid-connect/certs"
+      HTTP_URL: 0.0.0.0:8070
+      RUST_LOG: info,api_gateway=debug
+      MICROSERVICE_CATALOG_URL: "http://catalog:8080"
+      MICROSERVICE_ORDER_URL: "http://order:8081"
+      MICROSERVICE_CUSTOMER_URL: "http://customer:8082"
+      MICROSERVICE_RESTAURANT_URL: "http://restaurant:8083"
+      MICROSERVICE_PAYMENT_URL: "http://payment:8084"
+      CARGO_TARGET_DIR: /app/target
+    volumes:
+      - ../../api-gateway:/app
+      - ../../volumes/cargo-registry:/usr/local/cargo/registry
+      - ../../volumes/api-gateway-target:/app/target
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://0.0.0.0:8070/api/health/ready | grep '\"status\":\"Ok\"' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    networks:
+      - rust-microservices-network
 
   kafka:
+    # Stay on Kafka 3.x: the `kafka` Rust crate speaks protocol versions removed in Kafka 4.0.
     image: docker.io/bitnami/kafka:3.9
     container_name: kafka-container
     ports:
@@ -167,25 +316,33 @@ services:
       - KAFKA_CFG_NODE_ID=0
       - KAFKA_CFG_PROCESS_ROLES=controller,broker
       - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
-      # Listeners
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://:9092
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      # Listeners: INTERNAL for containers (kafka:29092), EXTERNAL for the host (localhost:9092)
+      - KAFKA_CFG_LISTENERS=INTERNAL://:29092,CONTROLLER://:9093,EXTERNAL://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
       - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:29092 --list >/dev/null 2>&1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 15
     networks:
       - rust-microservices-network
 
   kafka-init:
     image: docker.io/bitnami/kafka:3.9
+    container_name: kafka-init-container
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     volumes:
       - ./kafka/create-topics.sh:/create-topics.sh
       - ./kafka/topics:/topics
     entrypoint: [ "/bin/bash", "/create-topics.sh" ]
     environment:
-      - KAFKA_BROKER=kafka:9092
+      - KAFKA_BROKER=kafka:29092
     networks:
       - rust-microservices-network
 
@@ -193,6 +350,8 @@ volumes:
   catalog-db:
   order-db:
   customer-db:
+  restaurant-db:
+  payment-db:
   kafka_data:
     driver: local
 

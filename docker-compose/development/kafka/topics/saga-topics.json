@@ -1,0 +1,29 @@
+{
+  "topics": [
+    {
+      "topic": "restaurant-approval-request",
+      "num_partitions": 3,
+      "replication_factor": 1
+    },
+    {
+      "topic": "restaurant-approval-response",
+      "num_partitions": 3,
+      "replication_factor": 1
+    },
+    {
+      "topic": "restaurant-approval-cancel-request",
+      "num_partitions": 3,
+      "replication_factor": 1
+    },
+    {
+      "topic": "payment-request",
+      "num_partitions": 3,
+      "replication_factor": 1
+    },
+    {
+      "topic": "payment-response",
+      "num_partitions": 3,
+      "replication_factor": 1
+    }
+  ]
+}

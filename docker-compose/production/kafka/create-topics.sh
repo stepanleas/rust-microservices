@@ -3,7 +3,12 @@ set -e
 
 echo "⏳ Waiting for Kafka to be ready..."
 
-BROKER=${KAFKA_BROKER:-kafka:9092}
+BROKER=${KAFKA_BROKER:-kafka:29092}
+
+until kafka-topics.sh --bootstrap-server "$BROKER" --list >/dev/null 2>&1; do
+  echo "   Kafka at $BROKER is not ready yet, retrying in 2s..."
+  sleep 2
+done
 TOPIC_DIR="/topics"
 
 create_topic() {

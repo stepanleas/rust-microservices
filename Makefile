@@ -1,4 +1,6 @@
-services := catalog order customer
+services := catalog order customer restaurant payment api-gateway
+rust_services := catalog customer order restaurant payment api-gateway
+compose_dev := docker compose -f docker-compose/development/docker-compose.yml
 
 build_images:
 	@start=$$(date +%s); \
@@ -8,10 +10,18 @@ build_images:
 			cd $$service && docker build -t artellas/rust-$$service:$(version) . && cd - > /dev/null; \
 		) & \
 	done; \
-	( \
-		echo "==== Building gateway ===="; \
-		cd spring-boot-api-gateway && mvn clean compile jib:dockerBuild && cd - > /dev/null; \
-	) & \
+	wait; \
+	end=$$(date +%s); \
+	echo "✅ Concurrent build took $$((end - start)) seconds."
+
+build_dev_images:
+	@start=$$(date +%s); \
+	for service in $(services); do \
+		( \
+			echo "==== Building $$service ===="; \
+			cd $$service && docker build -f Dockerfile-dev -t artellas/rust-$$service:dev . && cd - > /dev/null; \
+		) & \
+	done; \
 	wait; \
 	end=$$(date +%s); \
 	echo "✅ Concurrent build took $$((end - start)) seconds."
@@ -23,10 +33,6 @@ remove_images:
 			docker rmi artellas/rust-$$service:$(version); \
 		) & \
 	done; \
-	( \
-		echo "==== Removing artellas/rust-spring-boot-api-gateway:$(version) ===="; \
-		docker rmi artellas/rust-spring-boot-api-gateway:$(version); \
-	) & \
 	wait
 
 push_images:
@@ -36,8 +42,26 @@ push_images:
 			docker push artellas/rust-$$service:$(version); \
 		) & \
 	done; \
-	( \
-		echo "==== Pushing artellas/rust-spring-boot-api-gateway:$(version) ===="; \
-		docker push artellas/rust-spring-boot-api-gateway:$(version); \
-	) & \
 	wait
+
+# Infrastructure only (Postgres x5 + Kafka + topics), for running the services with `cargo run`.
+infra_up:
+	$(compose_dev) up -d catalog-db order-db customer-db restaurant-db payment-db kafka kafka-init
+
+up:
+	$(compose_dev) up -d --build catalog order customer restaurant payment api-gateway
+
+down:
+	$(compose_dev) down
+
+# Unit + integration tests (testcontainers, needs Docker) of every service.
+test_all:
+	@for service in $(rust_services); do \
+		echo "==== Testing $$service ===="; \
+		(cd $$service && cargo test --workspace) || exit 1; \
+	done
+
+# End-to-end saga check against running services.
+e2e:
+	./scripts/e2e-saga.sh
+

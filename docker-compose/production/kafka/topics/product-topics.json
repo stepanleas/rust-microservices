@@ -9,6 +9,11 @@
       "topic": "product-updated",
       "num_partitions": 3,
       "replication_factor": 1
+    },
+    {
+      "topic": "product-deleted",
+      "num_partitions": 3,
+      "replication_factor": 1
     }
   ]
 }

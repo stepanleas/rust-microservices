@@ -1,4 +1,4 @@
-use crate::entities::Customer;
+use crate::aggregates::customer::Customer;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

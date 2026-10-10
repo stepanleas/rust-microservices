@@ -1,99 +1,81 @@
-use crate::app_state::AppState;
-use crate::error::ApiError;
-use crate::requests::{CreateCustomerRequest, UpdateCustomerRequest};
-use crate::responses::CustomerResponse;
-use crate::validation::ValidatedJson;
+use crate::api::correlation_id;
+use crate::dto::requests::{CreateCustomerRequest, UpdateCustomerRequest};
+use crate::dto::responses::{CustomerResponse, DataResponse};
+use crate::state::AppState;
 use actix_web::web::Path;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, Responder, post, put, web};
-use anyhow::anyhow;
+use actix_web::{HttpRequest, HttpResponse, Responder, post, put, web};
 use application::commands::{CreateCustomerCommand, UpdateCustomerCommand};
-use application::handlers::{CreateCustomerCommandHandler, UpdateCustomerCommandHandler};
 use serde_json::json;
+use shared::web::{ApiError, ErrorResponse, ValidatedJson, blocking};
 use uuid::Uuid;
 
 const CUSTOMERS: &str = "Customers";
 
-#[tracing::instrument(skip(req))]
+/// Create a customer
+///
+/// Persists the customer and publishes a `customer-created` event to Kafka so the
+/// order service can keep its local customer replica in sync.
+#[tracing::instrument(skip(req, state))]
 #[utoipa::path(
     tag = CUSTOMERS,
     operation_id = "create_customer",
     responses(
-        (status = 201, description = "Create a customer", body = [CustomerResponse])
+        (status = 201, description = "Customer created", body = DataResponse<CustomerResponse>),
+        (status = 400, description = "Malformed JSON or request validation failed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     ),
     request_body = CreateCustomerRequest,
 )]
 #[post("")]
 pub async fn create(
     req: HttpRequest,
+    state: web::Data<AppState>,
     request: ValidatedJson<CreateCustomerRequest>,
 ) -> Result<impl Responder, ApiError> {
-    let correlation_id = req
-        .extensions()
-        .get::<String>()
-        .cloned()
-        .unwrap_or("unknown".to_string());
-
+    let correlation_id = correlation_id(&req);
     tracing::info!(%correlation_id, "Handling customer create");
 
     let payload = request.into_inner();
-
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
-
-    let handler = CreateCustomerCommandHandler::new(
-        state.customer_repository.clone(),
-        state.customer_message_publisher.clone(),
-    );
-
     let command = CreateCustomerCommand::new(
         payload.user_name.clone(),
         payload.first_name.clone(),
         payload.last_name.clone(),
     );
 
-    let customer = handler.execute(command).await?;
+    let use_case = state.create_customer.clone();
+    let customer = blocking(move || use_case.execute(command)).await?;
 
     Ok(HttpResponse::Created().json(json!({ "data": CustomerResponse::from(customer) })))
 }
 
-#[tracing::instrument(skip(req))]
+/// Update a customer
+///
+/// Upserts the customer by id and publishes a `customer-updated` event to Kafka.
+#[tracing::instrument(skip(req, state))]
 #[utoipa::path(
     tag = CUSTOMERS,
     operation_id = "update_customer",
     responses(
-        (status = 200, description = "Update a customer by id", body = [CustomerResponse])
+        (status = 200, description = "Customer updated", body = DataResponse<CustomerResponse>),
+        (status = 400, description = "Malformed JSON or request validation failed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     ),
     params(
-        ("id", description = "Id of the customer to update")
+        ("id" = Uuid, Path, description = "Id of the customer to update")
     ),
     request_body = UpdateCustomerRequest,
 )]
 #[put("/{id}")]
 pub async fn update(
     req: HttpRequest,
+    state: web::Data<AppState>,
     id: Path<Uuid>,
     request: ValidatedJson<UpdateCustomerRequest>,
 ) -> Result<impl Responder, ApiError> {
-    let correlation_id = req
-        .extensions()
-        .get::<String>()
-        .cloned()
-        .unwrap_or("unknown".to_string());
-
+    let correlation_id = correlation_id(&req);
     tracing::info!(%correlation_id, "Handling customer update");
 
     let payload = request.into_inner();
-
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| ApiError::internal(anyhow!("Missing app state")))?;
-
-    let handler = UpdateCustomerCommandHandler::new(
-        state.customer_repository.clone(),
-        state.customer_message_publisher.clone(),
-    );
-
     let command = UpdateCustomerCommand::new(
         id.into_inner(),
         payload.user_name.clone(),
@@ -101,7 +83,8 @@ pub async fn update(
         payload.last_name.clone(),
     );
 
-    let customer = handler.execute(command).await?;
+    let use_case = state.update_customer.clone();
+    let customer = blocking(move || use_case.execute(command)).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "data": CustomerResponse::from(customer) })))
 }

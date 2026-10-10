@@ -13,24 +13,27 @@ print_schema:
 	diesel print-schema > src/infrastructure/src/schema.rs --database-url=$(DB_URL)
 
 cargo_fmt:
-	cargo fmt --all
+	cargo format
 
 cargo_fmt_check:
-	cargo fmt --all -- --check
+	cargo format_check
 
 cargo_fix:
-	cargo fix --workspace --allow-dirty --allow-staged
+	cargo fix_lint_warnings
 
-cargo_clippy:
-	cargo clippy --all-targets --all-features -- -D warnings
+cargo_lint:
+	cargo lint
 
 cargo_test:
-	cargo test --workspace --all-features -- --nocapture
+	cargo run_tests
 
-cargo_test_coverage:
-	cargo llvm-cov --workspace --all-features
+cargo_test_unit:
+	cargo unit_tests
+
+cargo_test_integration:
+	cargo integration_tests
 
 cargo_clean:
 	rm -rf ~/.cargo/registry/index/*
 
-cargo_all_checks: cargo_fmt_check cargo_fix cargo_clippy cargo_test
+cargo_all_checks: cargo_fmt_check cargo_fix cargo_lint cargo_test

@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 uuid.workspace = true
 shared.workspace = true
-thiserror.workspace = true
 chrono.workspace = true

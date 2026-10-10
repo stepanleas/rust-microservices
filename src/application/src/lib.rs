@@ -1,8 +1,6 @@
 pub mod commands;
-mod commands_test;
+#[cfg(test)]
+mod commands_tests;
 pub mod dtos;
-pub mod handlers;
-mod handlers_test;
 pub mod ports;
-pub mod repositories;
-pub mod settings;
+pub mod use_cases;

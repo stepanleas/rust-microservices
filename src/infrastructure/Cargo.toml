@@ -9,10 +9,12 @@ anyhow.workspace = true
 diesel.workspace = true
 diesel_migrations.workspace = true
 chrono.workspace = true
-shared.workspace = true
-testcontainers.workspace = true
-testcontainers-modules.workspace = true
-tokio.workspace = true
+shared = { workspace = true, features = ["db"] }
 
 domain = { path = "../domain" }
 application = { path = "../application" }
+
+[dev-dependencies]
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+tokio.workspace = true

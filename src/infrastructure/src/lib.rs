@@ -1,10 +1,8 @@
-pub mod config;
-pub mod entities;
-pub mod postgres_customer_repository;
-mod postgres_customer_repository_test;
-mod schema;
+use diesel_migrations::{EmbeddedMigrations, embed_migrations};
 
-use diesel::r2d2::ConnectionManager;
-use diesel::{PgConnection, r2d2};
+pub mod postgres;
+pub mod schema;
 
-pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+pub use shared::db::DbPool;
+
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/migrations");

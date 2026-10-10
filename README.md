@@ -320,8 +320,9 @@ GitHub Actions runs from the root `.github/workflows/`:
   ```
 
   builds `order/Dockerfile` and pushes `artellas/rust-order:1.4.0`, `:1.4`, `:1` and `:latest` (needs the
-  `DOCKER_USERNAME` / `DOCKER_PASSWORD` repository secrets). An existing tag can also be released
-  from **Actions → release → Run workflow** by entering the tag, e.g. `order-v1.0.0`.
+  `DOCKER_USERNAME` / `DOCKER_PASSWORD` secrets of the `Rust Microservices` environment). An existing tag can also be released
+  from **Actions → release → Run workflow** by entering one or more tags, e.g.
+  `order-v1.0.0 payment-v1.0.0`; each tag is built in its own parallel job.
 
 ---
 

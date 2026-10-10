@@ -1,6 +1,6 @@
 # Build from the repository root so the `shared` path dependency is in the context:
 #   docker build -f payment/Dockerfile -t artellas/rust-payment .
-FROM lukemathwalker/cargo-chef:latest-rust-1.98.1 as chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.98.1 AS chef
 WORKDIR /app/payment
 
 FROM chef AS planner
@@ -16,7 +16,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY ./payment .
 RUN cargo build -p starter --release
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 WORKDIR /app
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates libpq5 curl \

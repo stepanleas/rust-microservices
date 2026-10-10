@@ -21,6 +21,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ../../catalog:/app
+      - ../../shared:/shared
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
       - ../../volumes/catalog-target:/app/target
     healthcheck:
@@ -74,6 +75,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ../../order:/app
+      - ../../shared:/shared
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
       - ../../volumes/order-target:/app/target
     healthcheck:
@@ -126,6 +128,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ../../customer:/app
+      - ../../shared:/shared
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
       - ../../volumes/customer-target:/app/target
     healthcheck:
@@ -179,6 +182,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ../../restaurant:/app
+      - ../../shared:/shared
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
       - ../../volumes/restaurant-target:/app/target
     healthcheck:
@@ -232,6 +236,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ../../payment:/app
+      - ../../shared:/shared
       - ../../volumes/cargo-registry:/usr/local/cargo/registry
       - ../../volumes/payment-target:/app/target
     healthcheck:

@@ -1,0 +1,9 @@
+**/target/
+**/.env
+# Local-only cargo configs (e.g. a redirected target-dir) must not leak into image builds.
+**/.cargo/
+.git/
+.idea/
+volumes/
+docker-compose/
+scripts/

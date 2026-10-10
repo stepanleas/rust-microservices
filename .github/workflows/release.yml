@@ -1,0 +1,64 @@
+name: release
+
+# Each service is released on its own by pushing a tag `<service>-v<semver>`, e.g.
+#   git tag order-v1.4.0 && git push origin order-v1.4.0
+# which publishes artellas/rust-order:1.4.0, :1.4, :1 and :latest.
+on:
+  push:
+    tags:
+      - "catalog-v*"
+      - "customer-v*"
+      - "order-v*"
+      - "restaurant-v*"
+      - "payment-v*"
+      - "api-gateway-v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Parse tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          echo "service=${tag%-v*}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag##*-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: artellas/rust-${{ steps.tag.outputs.service }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.tag.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.tag.outputs.version }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # The build context is the repository root so the image can see `shared`.
+      - name: Build image and push to Docker Container Registry
+        id: docker_build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.tag.outputs.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ steps.tag.outputs.service }}
+          cache-to: type=gha,mode=max,scope=${{ steps.tag.outputs.service }}
+
+      - name: Image digest
+        run: echo "${{ steps.docker_build.outputs.digest }}"

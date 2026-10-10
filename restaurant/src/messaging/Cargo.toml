@@ -1,0 +1,18 @@
+[package]
+name = "messaging"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+rust_decimal.workspace = true
+uuid.workspace = true
+shared = { workspace = true, features = ["contracts", "kafka", "outbox"] }
+
+application = { path = "../application" }
+
+[dev-dependencies]
+application = { path = "../application", features = ["mocks"] }
+apache-avro.workspace = true
+domain = { path = "../domain" }

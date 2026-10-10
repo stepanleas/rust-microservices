@@ -1,0 +1,15 @@
+[package]
+name = "messaging"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+shared = { workspace = true, features = ["contracts", "kafka"] }
+
+domain = { path = "../domain" }
+application = { path = "../application" }
+
+[dev-dependencies]
+rusty-money.workspace = true

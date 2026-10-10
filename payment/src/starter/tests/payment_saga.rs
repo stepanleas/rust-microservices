@@ -7,27 +7,28 @@ use domain::aggregates::payment::Payment;
 use domain::enums::PaymentStatus;
 use infrastructure::DbPool;
 use infrastructure::postgres::PostgresPaymentRepository;
-use kafka::client::{FetchOffset, GroupOffsetStorage, KafkaClient};
-use kafka::consumer::Consumer;
-use kafka::producer::{Producer, Record};
 use rust_decimal::Decimal;
 use shared::contracts::AvroMessage;
 use shared::contracts::payment::{PaymentRequestAvroModel, PaymentResponseAvroModel};
 use shared::contracts::topics::{PAYMENT_REQUEST, PAYMENT_RESPONSE};
 use shared::domain::value_objects::OrderId;
-use shared::kafka::RetryPolicy;
+use shared::kafka::{KafkaConsumer, KafkaProducer, RetryPolicy};
 use shared::outbox::OutboxStatus;
 use shared::outbox::ports::OutboxRepository;
 use shared::outbox::postgres::PostgresOutboxRepository;
+use shared::shutdown::Shutdown;
 use starter::config::Settings;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use testcontainers::ContainerAsync;
 use testcontainers::runners::AsyncRunner;
+use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::kafka::apache::{KAFKA_PORT, Kafka};
 use testcontainers_modules::postgres::Postgres;
 use uuid::Uuid;
+
+/// Same major version as docker-compose and the Helm chart.
+const KAFKA_VERSION: &str = "4.3.1";
 
 struct TestContext {
     _postgres: ContainerAsync<Postgres>,
@@ -45,7 +46,7 @@ async fn setup_context() -> anyhow::Result<TestContext> {
     let pool = tokio::task::spawn_blocking(move || starter::wiring::connect_database(&db_settings))
         .await??;
 
-    let kafka = Kafka::default().start().await?;
+    let kafka = Kafka::default().with_tag(KAFKA_VERSION).start().await?;
     let kafka_host = format!("127.0.0.1:{}", kafka.get_host_port_ipv4(KAFKA_PORT).await?);
 
     // `payment-response` is deliberately not created here: the outbox relay's
@@ -60,27 +61,8 @@ async fn setup_context() -> anyhow::Result<TestContext> {
     })
 }
 
-/// Topics are auto-created by the broker on the first metadata request.
 fn wait_for_topics(host: &str, topics: &[&str]) -> anyhow::Result<()> {
-    let mut client = KafkaClient::new(vec![host.to_string()]);
-    let deadline = Instant::now() + Duration::from_secs(30);
-
-    loop {
-        let _ = client.load_metadata(topics);
-        let ready = topics.iter().all(|topic| {
-            client
-                .topics()
-                .partitions(topic)
-                .map(|partitions| !partitions.is_empty())
-                .unwrap_or(false)
-        });
-
-        if ready {
-            return Ok(());
-        }
-        anyhow::ensure!(Instant::now() < deadline, "topics {topics:?} not ready");
-        std::thread::sleep(Duration::from_millis(500));
-    }
+    shared::kafka::ensure_topics(&[host.to_string()], topics, 3, Duration::from_secs(30))
 }
 
 fn settings(kafka_host: &str) -> Settings {
@@ -95,6 +77,7 @@ fn settings(kafka_host: &str) -> Settings {
         outbox_poll_interval: Duration::from_millis(100),
         outbox_batch_size: 100,
         outbox_max_attempts: 50,
+        outbox_retention: Duration::from_secs(3600),
     }
 }
 
@@ -118,17 +101,14 @@ fn produce_payment_requests(
     host: &str,
     requests: Vec<PaymentRequestAvroModel>,
 ) -> anyhow::Result<()> {
-    let mut producer = Producer::from_hosts(vec![host.to_string()])
-        .with_ack_timeout(Duration::from_secs(1))
-        .create()?;
+    let mut producer = KafkaProducer::new(vec![host.to_string()]);
 
     for request in requests {
-        let bytes = request.to_avro_bytes()?;
-        producer.send(&Record::from_key_value(
+        producer.send(
             PAYMENT_REQUEST,
-            request.order_id.as_bytes(),
-            bytes.as_slice(),
-        ))?;
+            &request.order_id,
+            &request.to_avro_bytes()?,
+        )?;
     }
 
     Ok(())
@@ -154,12 +134,11 @@ fn consume_payment_responses(
     host: &str,
     expected: usize,
 ) -> anyhow::Result<HashMap<String, PaymentResponseAvroModel>> {
-    let mut consumer = Consumer::from_hosts(vec![host.to_string()])
-        .with_topic(PAYMENT_RESPONSE.to_string())
-        .with_group(format!("test-{}", Uuid::new_v4()))
-        .with_fallback_offset(FetchOffset::Earliest)
-        .with_offset_storage(GroupOffsetStorage::Kafka.into())
-        .create()?;
+    let consumer = KafkaConsumer::new(
+        vec![host.to_string()],
+        format!("test-{}", Uuid::new_v4()),
+        &[PAYMENT_RESPONSE],
+    )?;
 
     let mut responses = HashMap::new();
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -167,15 +146,14 @@ fn consume_payment_responses(
     while responses.len() < expected {
         anyhow::ensure!(Instant::now() < deadline, "payment responses not received");
 
-        for message_set in consumer.poll()?.iter() {
-            for message in message_set.messages() {
-                assert!(!message.key.is_empty(), "message must be keyed by order id");
+        let Some(message) = consumer.poll(Duration::from_millis(500))? else {
+            continue;
+        };
+        assert!(!message.key.is_empty(), "message must be keyed by order id");
 
-                for response in PaymentResponseAvroModel::from_avro_bytes(message.value)? {
-                    assert_eq!(response.order_id.as_bytes(), message.key);
-                    responses.insert(response.order_id.clone(), response);
-                }
-            }
+        for response in PaymentResponseAvroModel::from_avro_bytes(&message.payload)? {
+            assert_eq!(response.order_id.as_bytes(), message.key);
+            responses.insert(response.order_id.clone(), response);
         }
     }
 
@@ -210,6 +188,7 @@ async fn test_payment_request_is_paid_and_answered_through_the_outbox() -> anyho
             "payment-test-group".into(),
             handler,
             RetryPolicy::default(),
+            &Shutdown::new(),
         )
     });
 

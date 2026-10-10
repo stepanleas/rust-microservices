@@ -6,36 +6,38 @@ use application::use_cases::{
     ListCategories, ListProducts, UpdateCategory, UpdateProduct,
 };
 use infrastructure::postgres::{PostgresCategoryRepository, PostgresProductRepository};
-use messaging::publishers::{PRODUCT_TOPICS, ProductKafkaMessagePublisher};
+use messaging::publishers::ProductKafkaMessagePublisher;
 use presentation::state::AppState;
-use shared::db::DbSettings;
+use shared::db::{DbPool, DbSettings};
 use shared::kafka::KafkaProducer;
 use std::sync::Arc;
 
-/// Builds the pool (running migrations), the adapters and the use cases.
+/// Builds the pool and runs the migrations.
 ///
 /// Blocking (database connection): call it before the server starts.
-pub fn build_app_state(settings: &Settings) -> anyhow::Result<AppState> {
-    let pool = shared::db::connect(
+pub fn connect_database(settings: &Settings) -> anyhow::Result<DbPool> {
+    shared::db::connect(
         &DbSettings {
             url: settings.database_url.clone(),
             max_connections: settings.db_max_connections,
             connection_timeout: settings.db_connection_timeout,
         },
         infrastructure::MIGRATIONS,
-    )?;
+    )
+}
 
+/// Builds the adapters and the use cases.
+pub fn build_app_state(settings: &Settings, pool: &DbPool) -> AppState {
     let category_repository: Arc<dyn CategoryRepository> =
-        Arc::new(PostgresCategoryRepository::new(&pool));
+        Arc::new(PostgresCategoryRepository::new(pool));
     let product_repository: Arc<dyn ProductRepository> =
-        Arc::new(PostgresProductRepository::new(&pool));
+        Arc::new(PostgresProductRepository::new(pool));
     let product_publisher: Arc<dyn ProductMessagePublisher> =
-        Arc::new(ProductKafkaMessagePublisher::new(KafkaProducer::new(
-            vec![settings.kafka_host.clone()],
-            &PRODUCT_TOPICS,
-        )));
+        Arc::new(ProductKafkaMessagePublisher::new(KafkaProducer::new(vec![
+            settings.kafka_host.clone(),
+        ])));
 
-    Ok(AppState {
+    AppState {
         environment: settings.environment.clone(),
 
         list_categories: Arc::new(ListCategories::new(category_repository.clone())),
@@ -57,5 +59,5 @@ pub fn build_app_state(settings: &Settings) -> anyhow::Result<AppState> {
             product_publisher.clone(),
         )),
         delete_product: Arc::new(DeleteProduct::new(product_repository, product_publisher)),
-    })
+    }
 }

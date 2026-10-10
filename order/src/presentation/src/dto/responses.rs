@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-const OK_STATUS: &str = "Ok";
-
 /// Envelope used by every successful response: `{ "data": ... }`.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DataResponse<T: ToSchema> {
@@ -24,21 +22,6 @@ impl AppInfoResponse {
     pub fn new(environment: &str) -> Self {
         Self {
             environment: environment.to_string(),
-        }
-    }
-}
-
-#[readonly::make]
-#[derive(Default, Serialize, Deserialize, ToSchema)]
-pub struct HealthCheckResponse {
-    #[schema(example = "Ok")]
-    pub status: String,
-}
-
-impl HealthCheckResponse {
-    pub fn new() -> Self {
-        Self {
-            status: OK_STATUS.to_string(),
         }
     }
 }

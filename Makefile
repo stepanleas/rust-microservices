@@ -81,3 +81,22 @@ test_all:
 e2e:
 	./scripts/e2e-saga.sh
 
+# Production stack on images built from this checkout (`make build_images version=local`),
+# with 3 replicas of order and restaurant.
+compose_scaled := docker compose -f docker-compose/production/docker-compose.yml -f docker-compose/production/docker-compose.scale.yml
+replicas ?= 3
+
+scale_up:
+	$(compose_scaled) up -d --wait --scale order=$(replicas) --scale restaurant=$(replicas)
+
+scale_down:
+	$(compose_scaled) down
+
+# The saga check through the gateway, against the scaled stack.
+e2e_scaled:
+	ORDER_URL=http://localhost:8070/shop/order \
+	RESTAURANT_URL=http://localhost:8070/shop/restaurant \
+	PAYMENT_STOP_CMD="$(compose_scaled) stop payment" \
+	PAYMENT_START_CMD="$(compose_scaled) start payment" \
+	./scripts/e2e-saga.sh
+

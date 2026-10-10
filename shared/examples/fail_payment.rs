@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let mut producer = KafkaProducer::new(vec![host], &[topics::PAYMENT_RESPONSE]);
+    let mut producer = KafkaProducer::new(vec![host]);
     producer.send(
         topics::PAYMENT_RESPONSE,
         &request.order_id,
@@ -54,18 +54,16 @@ fn find_payment_request(
     timeout: Duration,
 ) -> anyhow::Result<PaymentRequestAvroModel> {
     let group = format!("e2e-fail-payment-{}", uuid::Uuid::new_v4());
-    let mut consumer =
-        KafkaConsumer::new(vec![host.to_string()], group, &[topics::PAYMENT_REQUEST])?;
+    let consumer = KafkaConsumer::new(vec![host.to_string()], group, &[topics::PAYMENT_REQUEST])?;
     let started = Instant::now();
 
     while started.elapsed() < timeout {
-        for message_set in consumer.poll()?.iter() {
-            for message in message_set.messages() {
-                for request in PaymentRequestAvroModel::from_avro_bytes(message.value)? {
-                    if request.order_id == order_id {
-                        return Ok(request);
-                    }
-                }
+        let Some(message) = consumer.poll(Duration::from_millis(500))? else {
+            continue;
+        };
+        for request in PaymentRequestAvroModel::from_avro_bytes(&message.payload)? {
+            if request.order_id == order_id {
+                return Ok(request);
             }
         }
     }

@@ -7,9 +7,6 @@ use shared::domain::value_objects::ProductId;
 use shared::kafka::KafkaProducer;
 use std::sync::Mutex;
 
-/// Topics this publisher writes to, for building its [`KafkaProducer`].
-pub const PRODUCT_TOPICS: [&str; 3] = [PRODUCT_CREATED, PRODUCT_UPDATED, PRODUCT_DELETED];
-
 /// Publishes product events straight to Kafka, keyed by product id.
 ///
 /// The use cases call it from actix's blocking pool (`shared::web::blocking`), so waiting on

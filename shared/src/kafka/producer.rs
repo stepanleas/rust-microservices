@@ -1,65 +1,86 @@
-use kafka::client::{KafkaClient, RequiredAcks};
-use kafka::producer::{Producer, Record};
+use rdkafka::ClientConfig;
+use rdkafka::message::{Header, OwnedHeaders};
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use std::time::Duration;
 
-/// Lazily connected Kafka producer that rebuilds itself after a failed send.
+/// How long librdkafka keeps retrying a message (broker down, leader election) before the send
+/// fails. Short enough that the outbox relay notices and retries the row on its next poll.
+const MESSAGE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Idempotent Kafka producer (`acks=all`) whose `send` waits for the broker's acknowledgement,
+/// so the outbox relay marks a message completed only once Kafka has it.
 ///
-/// The `kafka` crate snapshots the partitions of every known topic when a `Producer` is created,
-/// so a producer created before a topic existed (or before Kafka was reachable) can never send to
-/// it. Dropping the producer on failure and recreating it with fresh metadata on the next send
-/// makes the outbox relay recover on its next attempt.
+/// Connects lazily: creating it never fails, and topics missing at startup are auto-created on
+/// the first send (when the broker allows it).
 pub struct KafkaProducer {
     hosts: Vec<String>,
-    topics: Vec<String>,
-    producer: Option<Producer>,
+    producer: Option<FutureProducer>,
 }
 
 impl KafkaProducer {
-    pub fn new(hosts: Vec<String>, topics: &[&str]) -> Self {
+    pub fn new(hosts: Vec<String>) -> Self {
         Self {
             hosts,
-            topics: topics.iter().map(|topic| topic.to_string()).collect(),
             producer: None,
         }
     }
 
-    fn producer(&mut self) -> anyhow::Result<&mut Producer> {
+    fn producer(&mut self) -> anyhow::Result<&FutureProducer> {
         if self.producer.is_none() {
-            let mut client = KafkaClient::new(self.hosts.clone());
-            // Requesting explicit topics lets the broker auto-create missing ones.
-            client.load_metadata(&self.topics)?;
-
-            for topic in &self.topics {
-                let has_partitions = client
-                    .topics()
-                    .partitions(topic)
-                    .is_some_and(|partitions| !partitions.is_empty());
-
-                if !has_partitions {
-                    anyhow::bail!("Topic {topic} has no partitions yet");
-                }
-            }
-
-            let producer = Producer::from_client(client)
-                .with_ack_timeout(Duration::from_secs(1))
-                .with_required_acks(RequiredAcks::One)
+            let producer = ClientConfig::new()
+                .set("bootstrap.servers", self.hosts.join(","))
+                .set("acks", "all")
+                .set("enable.idempotence", "true")
+                .set("linger.ms", "5")
+                .set("compression.type", "lz4")
+                .set(
+                    "message.timeout.ms",
+                    MESSAGE_TIMEOUT.as_millis().to_string(),
+                )
                 .create()?;
-
             self.producer = Some(producer);
         }
 
-        Ok(self.producer.as_mut().expect("producer was just created"))
+        Ok(self.producer.as_ref().expect("producer was just created"))
     }
 
     /// Sends a keyed record. Messages with the same key (e.g. one order) keep their order.
     pub fn send(&mut self, topic: &str, key: &str, payload: &[u8]) -> anyhow::Result<()> {
-        let record = Record::from_key_value(topic, key.as_bytes(), payload);
+        self.send_with_headers(topic, key, payload, &[])
+    }
 
-        if let Err(error) = self.producer()?.send(&record) {
-            self.producer = None;
-            return Err(error.into());
+    /// Like [`Self::send`], with record headers (e.g. the W3C `traceparent`).
+    pub fn send_with_headers(
+        &mut self,
+        topic: &str,
+        key: &str,
+        payload: &[u8],
+        headers: &[(&str, &[u8])],
+    ) -> anyhow::Result<()> {
+        let mut record = FutureRecord::to(topic).key(key).payload(payload);
+        if !headers.is_empty() {
+            let headers = headers
+                .iter()
+                .fold(OwnedHeaders::new(), |all, (key, value)| {
+                    all.insert(Header {
+                        key,
+                        value: Some(*value),
+                    })
+                });
+            record = record.headers(headers);
         }
 
-        Ok(())
+        let delivery = self
+            .producer()?
+            .send_result(record)
+            .map_err(|(error, _)| error)?;
+
+        match futures::executor::block_on(delivery) {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err((error, _))) => Err(anyhow::anyhow!("Failed to deliver to {topic}: {error}")),
+            Err(_) => Err(anyhow::anyhow!(
+                "Delivery to {topic} was cancelled (producer dropped)"
+            )),
+        }
     }
 }

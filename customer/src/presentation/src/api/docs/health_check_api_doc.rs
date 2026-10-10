@@ -1,18 +1,12 @@
-use crate::api::api_health_check::__path_live;
-use crate::api::api_health_check::__path_ready;
-use crate::api::api_health_check::__path_startup;
-
+use shared::web::health::{__path_live, __path_ready, __path_startup};
 use utoipa::OpenApi;
 
+/// The probes are shared by every service (`shared::web::health`).
 #[derive(OpenApi)]
 #[openapi(
     tags(
         (name = "Health", description = "Customer healthcheck management endpoints.")
     ),
-    paths(
-        startup,
-        live,
-        ready,
-    )
+    paths(startup, live, ready)
 )]
 pub(crate) struct HealthCheckApiDoc;

@@ -266,7 +266,7 @@ fn test_open_api_documents_every_endpoint() {
         "PaymentEnvelope",
         "CreatePaymentRequest",
         "UpdatePaymentRequest",
-        "HealthCheckEnvelope",
+        "HealthResponse",
         "AppInfoEnvelope",
     ] {
         assert!(schemas.contains_key(schema), "missing schema {schema}");

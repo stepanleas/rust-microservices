@@ -13,11 +13,12 @@ use infrastructure::postgres::{
 };
 use infrastructure::{DbPool, MIGRATIONS};
 use messaging::handlers::RestaurantMessageHandler;
-use messaging::publishers::{OutboxKafkaPublisher, PUBLISHED_TOPICS};
+use messaging::publishers::OutboxKafkaPublisher;
 use presentation::state::AppState;
 use shared::db::DbSettings;
 use shared::kafka::{KafkaProducer, RetryPolicy};
 use shared::outbox::relay::{OutboxRelay, RelaySettings};
+use shared::shutdown::Shutdown;
 use std::sync::Arc;
 use std::thread;
 
@@ -93,14 +94,21 @@ pub fn build_outbox_relay(
             poll_interval: settings.outbox_poll_interval,
             batch_size: settings.outbox_batch_size,
             max_attempts: settings.outbox_max_attempts,
+            retention: settings.outbox_retention,
         },
     )
 }
 
-/// Consumes the restaurant topics on a dedicated thread, forever.
-pub fn spawn_kafka_listener(settings: &Settings, pool: &DbPool) -> thread::JoinHandle<()> {
+/// Consumes the restaurant topics on a dedicated thread until `shutdown`.
+pub fn spawn_kafka_listener(
+    settings: &Settings,
+    pool: &DbPool,
+    shutdown: &Shutdown,
+) -> thread::JoinHandle<()> {
     let hosts = vec![settings.kafka_host.clone()];
     let handler = Arc::new(build_message_handler(pool));
+
+    let shutdown = shutdown.clone();
 
     thread::spawn(move || {
         shared::kafka::listen(
@@ -108,12 +116,17 @@ pub fn spawn_kafka_listener(settings: &Settings, pool: &DbPool) -> thread::JoinH
             CONSUMER_GROUP.to_string(),
             handler,
             RetryPolicy::default(),
+            &shutdown,
         )
     })
 }
 
-/// Publishes the outbox messages on a dedicated thread, forever.
-pub fn spawn_outbox_relay(settings: &Settings, pool: &DbPool) -> thread::JoinHandle<()> {
-    let producer = KafkaProducer::new(vec![settings.kafka_host.clone()], PUBLISHED_TOPICS);
-    build_outbox_relay(settings, pool, producer).spawn()
+/// Publishes the outbox messages on a dedicated thread until `shutdown`.
+pub fn spawn_outbox_relay(
+    settings: &Settings,
+    pool: &DbPool,
+    shutdown: &Shutdown,
+) -> thread::JoinHandle<()> {
+    let producer = KafkaProducer::new(vec![settings.kafka_host.clone()]);
+    build_outbox_relay(settings, pool, producer).spawn(shutdown)
 }

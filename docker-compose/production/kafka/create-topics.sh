@@ -4,8 +4,9 @@ set -e
 echo "⏳ Waiting for Kafka to be ready..."
 
 BROKER=${KAFKA_BROKER:-kafka:29092}
+KAFKA_TOPICS=${KAFKA_TOPICS:-/opt/kafka/bin/kafka-topics.sh}
 
-until kafka-topics.sh --bootstrap-server "$BROKER" --list >/dev/null 2>&1; do
+until "$KAFKA_TOPICS" --bootstrap-server "$BROKER" --list >/dev/null 2>&1; do
   echo "   Kafka at $BROKER is not ready yet, retrying in 2s..."
   sleep 2
 done
@@ -17,7 +18,7 @@ create_topic() {
   local replication=$3
 
   echo "📘 Creating topic: $topic"
-  kafka-topics.sh --create \
+  "$KAFKA_TOPICS" --create \
     --if-not-exists \
     --topic "$topic" \
     --bootstrap-server "$BROKER" \
@@ -31,7 +32,7 @@ for file in "$TOPIC_DIR"/*.json; do
   # Clean up JSON: remove spaces and newlines
   json=$(tr -d '\n' < "$file" | tr -d '[:space:]')
 
-  # Extract blocks like: {"topic":"customer-created","num_partitions":3,"replication_factor":1}
+  # Extract blocks like: {"topic":"customer-created","num_partitions":12,"replication_factor":1}
   echo "$json" | grep -o '{[^}]*}' | while IFS= read -r block; do
     topic=$(echo "$block" | sed -n 's/.*"topic":"\([^"]*\)".*/\1/p')
     partitions=$(echo "$block" | sed -n 's/.*"num_partitions":\([0-9]*\).*/\1/p')

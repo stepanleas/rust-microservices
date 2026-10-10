@@ -1,10 +1,12 @@
-//! Kafka adapters on top of the `kafka` crate (Kafka 3.x protocol).
+//! Kafka adapters on top of librdkafka (`rdkafka`): consumer groups, idempotent producer, headers.
 
+mod admin;
 mod consumer;
 mod listener;
 mod producer;
 
-pub use consumer::KafkaConsumer;
+pub use admin::ensure_topics;
+pub use consumer::{KafkaConsumer, KafkaMessage};
 pub use listener::{MessageHandler, RetryPolicy, listen};
 pub use producer::KafkaProducer;
 

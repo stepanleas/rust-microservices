@@ -32,7 +32,6 @@ bigdecimal = "0.4"
 # Logging
 tracing = "0.1.44"
 tracing-actix-web = "0.7.22"
-env_logger = "0.11.11"
 
 # Configuration
 dotenv = "0.15.0"
@@ -60,7 +59,6 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "
 rust_decimal = { version = "1.43.0", features = ["macros"] }
 
 # Messaging
-kafka = "0.10.0"
 apache-avro = "0.22.0"
 
 # Shared

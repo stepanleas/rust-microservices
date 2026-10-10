@@ -7,7 +7,6 @@ use infrastructure::DbPool;
 use infrastructure::postgres::{
     PostgresOrderApprovalRepository, PostgresOutboxRepository, PostgresProductRepository,
 };
-use messaging::publishers::PUBLISHED_TOPICS;
 use rust_decimal::dec;
 use shared::contracts::restaurant::RestaurantApprovalResponseAvroModel;
 use shared::contracts::topics;
@@ -15,6 +14,7 @@ use shared::domain::value_objects::{OrderId, ProductId};
 use shared::kafka::{KafkaProducer, MessageHandler, RetryPolicy};
 use shared::outbox::OutboxStatus;
 use shared::outbox::ports::OutboxRepository;
+use shared::shutdown::Shutdown;
 use starter::config::Settings;
 use starter::wiring::{build_message_handler, build_outbox_relay};
 use std::sync::Arc;
@@ -47,7 +47,7 @@ fn approval_status(pool: &DbPool, order_id: Uuid) -> anyhow::Result<Option<Order
 }
 
 fn relay_producer(host: &str) -> KafkaProducer {
-    KafkaProducer::new(vec![host.to_string()], PUBLISHED_TOPICS)
+    KafkaProducer::new(vec![host.to_string()])
 }
 
 /// Starts the real consumer loop in the background.
@@ -56,7 +56,13 @@ fn spawn_listener(pool: &DbPool, host: &str, group: &str) {
     let hosts = vec![host.to_string()];
     let group = group.to_string();
     std::thread::spawn(move || {
-        shared::kafka::listen(hosts, group, handler, RetryPolicy::default())
+        shared::kafka::listen(
+            hosts,
+            group,
+            handler,
+            RetryPolicy::default(),
+            &Shutdown::new(),
+        )
     });
 }
 
@@ -136,7 +142,7 @@ async fn test_rejected_order_is_consumed_from_kafka_and_answered() -> anyhow::Re
 
     spawn_listener(&pool, &host, "restaurant-service-group-test");
 
-    KafkaProducer::new(vec![host.clone()], &[topics::RESTAURANT_APPROVAL_REQUEST]).send(
+    KafkaProducer::new(vec![host.clone()]).send(
         topics::RESTAURANT_APPROVAL_REQUEST,
         &order_id.to_string(),
         &common::approval_request(
@@ -191,13 +197,7 @@ async fn test_cancel_request_from_kafka_restocks_an_approved_order() -> anyhow::
     let items: Vec<(&str, i32)> = items.iter().map(|(id, q)| (id.as_str(), *q)).collect();
 
     spawn_listener(&pool, &host, "restaurant-service-group-cancel-test");
-    let mut producer = KafkaProducer::new(
-        vec![host.clone()],
-        &[
-            topics::RESTAURANT_APPROVAL_REQUEST,
-            topics::RESTAURANT_APPROVAL_CANCEL_REQUEST,
-        ],
-    );
+    let mut producer = KafkaProducer::new(vec![host.clone()]);
 
     // 1. The order is approved and its stock taken.
     producer.send(

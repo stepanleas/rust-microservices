@@ -2,17 +2,17 @@
   "topics": [
     {
       "topic": "product-created",
-      "num_partitions": 3,
+      "num_partitions": 12,
       "replication_factor": 1
     },
     {
       "topic": "product-updated",
-      "num_partitions": 3,
+      "num_partitions": 12,
       "replication_factor": 1
     },
     {
       "topic": "product-deleted",
-      "num_partitions": 3,
+      "num_partitions": 12,
       "replication_factor": 1
     }
   ]

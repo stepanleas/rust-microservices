@@ -1,7 +1,10 @@
 use super::{KafkaConsumer, KafkaProducer, dead_letter_topic};
+use crate::shutdown::Shutdown;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
+
+/// How long one poll waits for a message before polling again.
+const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Handles the messages of the topics a service consumes (the driving adapter's entry point).
 pub trait MessageHandler: Send + Sync {
@@ -38,104 +41,130 @@ impl RetryPolicy {
     }
 }
 
-/// Consumes the handler's topics forever. Blocking: run it on its own thread.
+/// Consumes the handler's topics until `shutdown` is triggered. Blocking: run it on its own
+/// thread.
 ///
-/// Offsets are committed only once every message of a poll was either handled or parked in
-/// `<topic>.dlq`. A failing message is retried with backoff first, so a database hiccup does
-/// not lose a saga reply. Messages of one partition are handled in order, so a retried
-/// message holds back the ones behind it.
+/// Joins the consumer group `group_id`, so the replicas of a service split the partitions.
+/// A message's offset is committed only once it was either handled or parked in `<topic>.dlq`.
+/// A failing message is retried with backoff first, so a database hiccup does not lose a saga
+/// reply. Messages of one partition are handled in order, so a retried message holds back the
+/// ones behind it.
+///
+/// On shutdown the listener finishes the message in hand (a message still being retried is
+/// left for redelivery, not dead-lettered), commits the stored offsets and returns.
 pub fn listen(
     hosts: Vec<String>,
     group_id: String,
     handler: Arc<dyn MessageHandler>,
     retry: RetryPolicy,
+    shutdown: &Shutdown,
 ) {
     let topics = handler.topics();
-    let mut consumer = retry_forever("create Kafka consumer", || {
+    let Some(consumer) = retry_forever("create Kafka consumer", shutdown, || {
         KafkaConsumer::new(hosts.clone(), group_id.clone(), &topics)
-    });
-    let dead_letter_topics: Vec<String> = topics.iter().map(|t| dead_letter_topic(t)).collect();
-    let dead_letter_topics: Vec<&str> = dead_letter_topics.iter().map(String::as_str).collect();
-    let mut dead_letters = KafkaProducer::new(hosts, &dead_letter_topics);
+    }) else {
+        return;
+    };
+    let mut dead_letters = KafkaProducer::new(hosts);
 
     tracing::info!("Kafka listener started for topics {:?}", topics);
     let mut poll_backoff = Duration::from_secs(1);
 
-    loop {
-        let message_sets = match consumer.poll() {
-            Ok(message_sets) => {
+    while !shutdown.is_triggered() {
+        let message = match consumer.poll(POLL_TIMEOUT) {
+            Ok(Some(message)) => {
                 poll_backoff = Duration::from_secs(1);
-                message_sets
+                message
             }
+            Ok(None) => continue,
             Err(error) => {
                 tracing::warn!(
                     "Kafka poll failed: {}. Retrying in {:?}...",
                     error,
                     poll_backoff
                 );
-                thread::sleep(poll_backoff);
+                shutdown.sleep(poll_backoff);
                 poll_backoff = (poll_backoff * 2).min(Duration::from_secs(30));
                 continue;
             }
         };
 
-        for message_set in message_sets.iter() {
-            let topic = message_set.topic();
-            for message in message_set.messages() {
-                let delivered = handle_with_retry(
-                    handler.as_ref(),
-                    topic,
-                    message.value,
-                    &retry,
-                    thread::sleep,
-                );
-                if let Err(error) = delivered {
-                    let dlq = dead_letter_topic(topic);
-                    tracing::error!(
-                        "Giving up on message at offset {} of {}: {}. Moving it to {}",
-                        message.offset,
-                        topic,
-                        error,
-                        dlq,
-                    );
-                    retry_forever("publish to dead letter topic", || {
-                        dead_letters.send(
-                            &dlq,
-                            &String::from_utf8_lossy(message.key),
-                            message.value,
-                        )
-                    });
+        let _span = tracing::info_span!(
+            "kafka_message",
+            topic = %message.topic,
+            partition = message.partition,
+            offset = message.offset,
+            key = %String::from_utf8_lossy(&message.key),
+        )
+        .entered();
+
+        let outcome = handle_with_retry(
+            handler.as_ref(),
+            &message.topic,
+            &message.payload,
+            &retry,
+            |backoff| shutdown.sleep(backoff),
+        );
+        match outcome {
+            Outcome::Handled => {}
+            Outcome::Interrupted => {
+                tracing::info!("Shutting down; the message will be redelivered");
+                break;
+            }
+            Outcome::GaveUp(error) => {
+                let dlq = dead_letter_topic(&message.topic);
+                tracing::error!("Giving up on message: {}. Moving it to {}", error, dlq);
+                let parked = retry_forever("publish to dead letter topic", shutdown, || {
+                    dead_letters.send(
+                        &dlq,
+                        &String::from_utf8_lossy(&message.key),
+                        &message.payload,
+                    )
+                });
+                if parked.is_none() {
+                    break;
                 }
             }
-
-            if let Err(error) = consumer.consume_messageset(message_set) {
-                tracing::error!(
-                    "Failed to mark message set of {} as consumed: {}",
-                    topic,
-                    error
-                );
-            }
         }
 
-        if let Err(error) = consumer.commit_consumed() {
-            tracing::error!("Failed to commit consumed messages: {}", error);
+        if let Err(error) = consumer.store_offset(&message) {
+            // Happens when the partition was revoked meanwhile; its new owner re-reads it.
+            tracing::warn!("Failed to store offset: {}", error);
         }
+    }
+
+    match consumer.commit() {
+        Ok(()) => tracing::info!("Kafka listener stopped, offsets committed"),
+        Err(error) if error.to_string().contains("NoOffset") => {
+            tracing::info!("Kafka listener stopped, no new offsets to commit")
+        }
+        Err(error) => tracing::warn!("Kafka listener stopped, final commit failed: {error}"),
     }
 }
 
-/// Calls the handler until it succeeds or the attempts are used up; returns the last error.
+#[derive(Debug)]
+enum Outcome {
+    Handled,
+    /// The handler kept failing; the last error.
+    GaveUp(anyhow::Error),
+    /// Shutdown was triggered while waiting to retry.
+    Interrupted,
+}
+
+/// Calls the handler until it succeeds or the attempts are used up. `sleep` waits between
+/// attempts and returns `false` to stop retrying.
 fn handle_with_retry(
     handler: &dyn MessageHandler,
     topic: &str,
     payload: &[u8],
     retry: &RetryPolicy,
-    sleep: impl Fn(Duration),
-) -> anyhow::Result<()> {
+    sleep: impl Fn(Duration) -> bool,
+) -> Outcome {
     let mut attempt = 1;
     loop {
         match handler.handle(topic, payload) {
-            Ok(()) => return Ok(()),
-            Err(error) if attempt >= retry.max_attempts.max(1) => return Err(error),
+            Ok(()) => return Outcome::Handled,
+            Err(error) if attempt >= retry.max_attempts.max(1) => return Outcome::GaveUp(error),
             Err(error) => {
                 let backoff = retry.backoff(attempt);
                 tracing::warn!(
@@ -146,18 +175,25 @@ fn handle_with_retry(
                     error,
                     backoff,
                 );
-                sleep(backoff);
+                if !sleep(backoff) {
+                    return Outcome::Interrupted;
+                }
                 attempt += 1;
             }
         }
     }
 }
 
-fn retry_forever<T>(what: &str, mut operation: impl FnMut() -> anyhow::Result<T>) -> T {
+/// Retries `operation` with backoff until it succeeds; `None` if shutdown came first.
+fn retry_forever<T>(
+    what: &str,
+    shutdown: &Shutdown,
+    mut operation: impl FnMut() -> anyhow::Result<T>,
+) -> Option<T> {
     let mut backoff = Duration::from_secs(1);
     loop {
         match operation() {
-            Ok(value) => return value,
+            Ok(value) => return Some(value),
             Err(error) => {
                 tracing::warn!(
                     "Failed to {}: {}. Retrying in {:?}...",
@@ -165,7 +201,9 @@ fn retry_forever<T>(what: &str, mut operation: impl FnMut() -> anyhow::Result<T>
                     error,
                     backoff
                 );
-                thread::sleep(backoff);
+                if !shutdown.sleep(backoff) {
+                    return None;
+                }
                 backoff = (backoff * 2).min(Duration::from_secs(30));
             }
         }
@@ -214,10 +252,11 @@ mod tests {
         let sleeps = Mutex::new(vec![]);
 
         let result = handle_with_retry(&handler, "topic", b"", &policy(), |d| {
-            sleeps.lock().unwrap().push(d)
+            sleeps.lock().unwrap().push(d);
+            true
         });
 
-        assert!(result.is_ok());
+        assert!(matches!(result, Outcome::Handled));
         assert_eq!(3, handler.calls.load(Ordering::SeqCst));
         assert_eq!(
             vec![Duration::from_millis(100), Duration::from_millis(150)],
@@ -232,9 +271,25 @@ mod tests {
             calls: AtomicU32::new(0),
         };
 
-        let result = handle_with_retry(&handler, "topic", b"", &policy(), |_| {});
+        let result = handle_with_retry(&handler, "topic", b"", &policy(), |_| true);
 
-        assert_eq!("failure 3", result.unwrap_err().to_string());
+        let Outcome::GaveUp(error) = result else {
+            panic!("expected GaveUp, got {result:?}");
+        };
+        assert_eq!("failure 3", error.to_string());
         assert_eq!(3, handler.calls.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn stops_retrying_on_shutdown() {
+        let handler = FailingHandler {
+            failures_before_success: 10,
+            calls: AtomicU32::new(0),
+        };
+
+        let result = handle_with_retry(&handler, "topic", b"", &policy(), |_| false);
+
+        assert!(matches!(result, Outcome::Interrupted));
+        assert_eq!(1, handler.calls.load(Ordering::SeqCst));
     }
 }

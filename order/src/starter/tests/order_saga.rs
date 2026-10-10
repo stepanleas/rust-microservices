@@ -18,8 +18,6 @@ use infrastructure::postgres::{
     PostgresCustomerRepository, PostgresOrderRepository, PostgresOrderSagaRepository,
     PostgresProductRepository,
 };
-use kafka::client::{FetchOffset, GroupOffsetStorage, KafkaClient};
-use kafka::consumer::Consumer;
 use rust_decimal::dec;
 use rusty_money::{Money, iso};
 use shared::contracts::AvroMessage;
@@ -31,21 +29,24 @@ use shared::contracts::restaurant::{
 use shared::contracts::topics;
 use shared::db::DbSettings;
 use shared::domain::value_objects::{CustomerId, ProductId};
-use shared::kafka::KafkaProducer;
+use shared::kafka::{KafkaConsumer, KafkaProducer};
 use shared::outbox::OutboxStatus;
 use shared::outbox::ports::OutboxRepository;
 use shared::outbox::postgres::PostgresOutboxRepository;
 use shared::outbox::relay::{OutboxRelay, RelaySettings};
+use shared::shutdown::Shutdown;
 use starter::wiring::{UseCases, outbox_relay, start_kafka_listener};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use testcontainers::ContainerAsync;
 use testcontainers::runners::AsyncRunner;
+use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::kafka::apache::{KAFKA_PORT, Kafka};
 use testcontainers_modules::postgres::Postgres;
 use uuid::Uuid;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// Same major version as docker-compose and the Helm chart.
+const KAFKA_VERSION: &str = "4.3.1";
 
 struct TestContext {
     _postgres: ContainerAsync<Postgres>,
@@ -62,7 +63,7 @@ struct TestContext {
 
 async fn setup() -> anyhow::Result<TestContext> {
     let postgres = Postgres::default().start().await?;
-    let kafka = Kafka::default().start().await?;
+    let kafka = Kafka::default().with_tag(KAFKA_VERSION).start().await?;
 
     let database_url = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
@@ -80,15 +81,18 @@ async fn setup() -> anyhow::Result<TestContext> {
     })
     .await??;
 
-    for topic in [
-        topics::RESTAURANT_APPROVAL_REQUEST,
-        topics::PAYMENT_REQUEST,
-        topics::RESTAURANT_APPROVAL_CANCEL_REQUEST,
-        topics::RESTAURANT_APPROVAL_RESPONSE,
-        topics::PAYMENT_RESPONSE,
-    ] {
-        wait_for_topic(&kafka_host, topic)?;
-    }
+    shared::kafka::ensure_topics(
+        std::slice::from_ref(&kafka_host),
+        &[
+            topics::RESTAURANT_APPROVAL_REQUEST,
+            topics::PAYMENT_REQUEST,
+            topics::RESTAURANT_APPROVAL_CANCEL_REQUEST,
+            topics::RESTAURANT_APPROVAL_RESPONSE,
+            topics::PAYMENT_RESPONSE,
+        ],
+        3,
+        TIMEOUT,
+    )?;
 
     // The production wiring: use cases, Kafka listener and outbox relay.
     let use_cases = UseCases::new(&pool);
@@ -96,6 +100,7 @@ async fn setup() -> anyhow::Result<TestContext> {
         &kafka_host,
         &format!("order-test-{}", Uuid::new_v4()),
         use_cases.message_handler(),
+        &Shutdown::new(),
     );
     let relay = outbox_relay(
         &pool,
@@ -104,6 +109,7 @@ async fn setup() -> anyhow::Result<TestContext> {
             poll_interval: Duration::from_millis(100),
             batch_size: 100,
             max_attempts: 5,
+            retention: Duration::from_secs(3600),
         },
     );
 
@@ -121,41 +127,18 @@ async fn setup() -> anyhow::Result<TestContext> {
     })
 }
 
-/// Asking for a topic's metadata makes the broker auto-create it.
-fn wait_for_topic(kafka_host: &str, topic: &str) -> anyhow::Result<()> {
-    let mut client = KafkaClient::new(vec![kafka_host.to_string()]);
-    let started = Instant::now();
-
-    while started.elapsed() < TIMEOUT {
-        let _ = client.load_metadata(&[topic]);
-        if client
-            .topics()
-            .partitions(topic)
-            .is_some_and(|partitions| !partitions.is_empty())
-        {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-
-    anyhow::bail!("topic {topic} was not created in time")
-}
-
 /// Reads the first message of a topic with a fresh consumer group.
 fn consume_one(kafka_host: &str, topic: &str) -> anyhow::Result<Vec<u8>> {
-    let mut consumer = Consumer::from_hosts(vec![kafka_host.to_string()])
-        .with_topic(topic.to_string())
-        .with_group(format!("test-{}", Uuid::new_v4()))
-        .with_fallback_offset(FetchOffset::Earliest)
-        .with_offset_storage(GroupOffsetStorage::Kafka.into())
-        .create()?;
+    let consumer = KafkaConsumer::new(
+        vec![kafka_host.to_string()],
+        format!("test-{}", Uuid::new_v4()),
+        &[topic],
+    )?;
     let started = Instant::now();
 
     while started.elapsed() < TIMEOUT {
-        for message_set in consumer.poll()?.iter() {
-            if let Some(message) = message_set.messages().first() {
-                return Ok(message.value.to_vec());
-            }
+        if let Some(message) = consumer.poll(Duration::from_millis(500))? {
+            return Ok(message.payload);
         }
     }
 
@@ -163,7 +146,7 @@ fn consume_one(kafka_host: &str, topic: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 fn produce(kafka_host: &str, topic: &str, key: &str, payload: &[u8]) -> anyhow::Result<()> {
-    KafkaProducer::new(vec![kafka_host.to_string()], &[topic]).send(topic, key, payload)
+    KafkaProducer::new(vec![kafka_host.to_string()]).send(topic, key, payload)
 }
 
 fn wait_for_order_status(

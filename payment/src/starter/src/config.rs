@@ -13,6 +13,7 @@ pub struct Settings {
     pub outbox_poll_interval: Duration,
     pub outbox_batch_size: i64,
     pub outbox_max_attempts: i32,
+    pub outbox_retention: Duration,
 }
 
 impl Settings {
@@ -32,6 +33,9 @@ impl Settings {
             outbox_poll_interval: Duration::from_millis(parse_env("OUTBOX_POLL_INTERVAL_MS", 1000)),
             outbox_batch_size: parse_env("OUTBOX_BATCH_SIZE", 100),
             outbox_max_attempts: parse_env("OUTBOX_MAX_ATTEMPTS", 10),
+            outbox_retention: Duration::from_secs(
+                parse_env::<u64>("OUTBOX_RETENTION_HOURS", 24) * 3600,
+            ),
         }
     }
 }

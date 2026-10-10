@@ -13,13 +13,6 @@ use shared::outbox::MessageKind;
 use shared::outbox::ports::OutboxMessagePublisher;
 use std::sync::Mutex;
 
-/// Topics the outbox publisher sends to.
-pub const PUBLISHED_TOPICS: [&str; 3] = [
-    topics::RESTAURANT_APPROVAL_REQUEST,
-    topics::PAYMENT_REQUEST,
-    topics::RESTAURANT_APPROVAL_CANCEL_REQUEST,
-];
-
 /// An Avro-encoded record ready to be sent to Kafka.
 #[derive(Debug, PartialEq)]
 pub struct EncodedOutboxMessage {

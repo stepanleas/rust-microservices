@@ -8,7 +8,7 @@ services:
       SERVICE_NAME: catalog_api
       DATABASE_URL: postgres://postgres:postgres@catalog-db:5432/catalog_db
       KAFKA_HOST: kafka:29092
-      RUST_LOG: info,kafka=warn
+      RUST_LOG: info
     ports:
       - "8080:8080"
     depends_on:
@@ -54,7 +54,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_db
       KAFKA_HOST: kafka:29092
       OUTBOX_POLL_INTERVAL_MS: 1000
-      RUST_LOG: info,kafka=warn
+      RUST_LOG: info
     ports:
       - "8081:8081"
     depends_on:
@@ -99,7 +99,7 @@ services:
       SERVICE_NAME: customer_api
       DATABASE_URL: postgres://postgres:postgres@customer-db:5432/customer_db
       KAFKA_HOST: kafka:29092
-      RUST_LOG: info,kafka=warn
+      RUST_LOG: info
     ports:
       - "8082:8082"
     depends_on:
@@ -145,7 +145,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@restaurant-db:5432/restaurant_db
       KAFKA_HOST: kafka:29092
       OUTBOX_POLL_INTERVAL_MS: 1000
-      RUST_LOG: info,kafka=warn
+      RUST_LOG: info
     ports:
       - "8083:8083"
     depends_on:
@@ -191,7 +191,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@payment-db:5432/payment_db
       KAFKA_HOST: kafka:29092
       OUTBOX_POLL_INTERVAL_MS: 1000
-      RUST_LOG: info,kafka=warn
+      RUST_LOG: info
     ports:
       - "8084:8084"
     depends_on:
@@ -261,27 +261,32 @@ services:
       - rust-microservices-network
 
   kafka:
-    # Stay on Kafka 3.x: the `kafka` Rust crate speaks protocol versions removed in Kafka 4.0.
-    image: docker.io/bitnami/kafka:3.9
+    image: docker.io/apache/kafka:4.3.1
     container_name: kafka-container
     ports:
       - "9092:9092"
     volumes:
-      - kafka_data:/bitnami
+      - kafka-data:/var/lib/kafka/data
     environment:
       # KRaft settings
-      - KAFKA_CFG_NODE_ID=0
-      - KAFKA_CFG_PROCESS_ROLES=controller,broker
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
       # Listeners: INTERNAL for containers (kafka:29092), EXTERNAL for the host (localhost:9092)
-      - KAFKA_CFG_LISTENERS=INTERNAL://:29092,CONTROLLER://:9093,EXTERNAL://:9092
-      - KAFKA_CFG_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
-      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INTERNAL
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_LISTENERS=INTERNAL://:29092,CONTROLLER://:9093,EXTERNAL://:9092
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+      # Single broker: the internal topics cannot be replicated.
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
     healthcheck:
-      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:29092 --list >/dev/null 2>&1" ]
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list >/dev/null 2>&1" ]
       interval: 10s
       timeout: 10s
       retries: 15
@@ -289,7 +294,7 @@ services:
       - rust-microservices-network
 
   kafka-init:
-    image: docker.io/bitnami/kafka:3.9
+    image: docker.io/apache/kafka:4.3.1
     container_name: kafka-init-container
     depends_on:
       kafka:
@@ -309,7 +314,7 @@ volumes:
   customer-db:
   restaurant-db:
   payment-db:
-  kafka_data:
+  kafka-data:
     driver: local
 
 networks:

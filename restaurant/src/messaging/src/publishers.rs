@@ -9,9 +9,6 @@ use shared::outbox::MessageKind;
 use shared::outbox::ports::OutboxMessagePublisher;
 use std::sync::Mutex;
 
-/// The topics the outbox publisher writes to.
-pub const PUBLISHED_TOPICS: &[&str] = &[topics::RESTAURANT_APPROVAL_RESPONSE];
-
 /// Publishes outbox messages to Kafka as Avro records.
 pub struct OutboxKafkaPublisher {
     producer: Mutex<KafkaProducer>,

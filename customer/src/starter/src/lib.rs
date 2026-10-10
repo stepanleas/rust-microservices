@@ -7,7 +7,9 @@ use actix_web::middleware::Logger;
 use actix_web::web::Data;
 use actix_web::{App, HttpServer};
 use anyhow::Result;
+use shared::db::DbHealthCheck;
 use shared::web::CorrelationIdMiddleware;
+use shared::web::health::HealthChecks;
 use tracing_actix_web::TracingLogger;
 use utoipa_actix_web::AppExt;
 use utoipa_swagger_ui::SwaggerUi;
@@ -20,7 +22,9 @@ async fn run_internal(settings: &Settings) -> Result<Server> {
     tracing::info!("Starting HTTP server at {}", settings.http_url);
     tracing::debug!("with configuration: {:?}", settings);
 
-    let app_state = wiring::build_app_state(settings)?;
+    let pool = wiring::connect_database(settings)?;
+    let app_state = wiring::build_app_state(settings, &pool);
+    let health_checks = HealthChecks::new().with(DbHealthCheck::new(&pool));
 
     let server = HttpServer::new(move || {
         App::new()
@@ -34,6 +38,7 @@ async fn run_internal(settings: &Settings) -> Result<Server> {
                 SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", api)
             })
             .app_data(Data::new(app_state.clone()))
+            .app_data(Data::new(health_checks.clone()))
             .into_app()
     })
     .bind(&settings.http_url)?

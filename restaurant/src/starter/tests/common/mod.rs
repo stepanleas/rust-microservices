@@ -1,17 +1,16 @@
 #![allow(dead_code)]
 
 use infrastructure::{DbPool, MIGRATIONS};
-use kafka::client::{FetchOffset, GroupOffsetStorage, KafkaClient};
-use kafka::consumer::Consumer;
 use shared::contracts::AvroMessage;
 use shared::contracts::restaurant::{
     RestaurantApprovalCancelRequestAvroModel, RestaurantApprovalProductAvroModel,
     RestaurantApprovalRequestAvroModel,
 };
 use shared::db::DbSettings;
+use shared::kafka::KafkaConsumer;
 use std::time::{Duration, Instant};
-use testcontainers::ContainerAsync;
 use testcontainers::runners::AsyncRunner;
+use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::kafka::apache::{KAFKA_PORT, Kafka};
 use testcontainers_modules::postgres::Postgres;
 
@@ -33,9 +32,12 @@ pub async fn start_postgres() -> anyhow::Result<(PostgresContainer, DbPool)> {
     Ok((container, pool))
 }
 
+/// Same major version as docker-compose and the Helm chart.
+const KAFKA_VERSION: &str = "4.3.1";
+
 /// Starts Kafka and returns the bootstrap address reachable from the host.
 pub async fn start_kafka() -> anyhow::Result<(KafkaContainer, String)> {
-    let container = Kafka::default().start().await?;
+    let container = Kafka::default().with_tag(KAFKA_VERSION).start().await?;
     let host = format!(
         "127.0.0.1:{}",
         container.get_host_port_ipv4(KAFKA_PORT).await?
@@ -44,46 +46,23 @@ pub async fn start_kafka() -> anyhow::Result<(KafkaContainer, String)> {
     Ok((container, host))
 }
 
-/// Requests metadata until the (auto-created) topics have partitions.
+/// Creates the topics (3 partitions) unless they exist.
 pub fn ensure_topics(host: &str, topics: &[&str]) -> anyhow::Result<()> {
-    let mut client = KafkaClient::new(vec![host.to_string()]);
-    let deadline = Instant::now() + Duration::from_secs(30);
-
-    loop {
-        let _ = client.load_metadata(topics);
-        let ready = topics.iter().all(|topic| {
-            client
-                .topics()
-                .partitions(topic)
-                .map(|partitions| !partitions.is_empty())
-                .unwrap_or(false)
-        });
-
-        if ready {
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            anyhow::bail!("topics {topics:?} were not created in time");
-        }
-        std::thread::sleep(Duration::from_millis(300));
-    }
+    shared::kafka::ensure_topics(&[host.to_string()], topics, 3, Duration::from_secs(30))
 }
 
 /// Consumes the first message of `topic` (from the earliest offset).
 pub fn consume_one(host: &str, topic: &str) -> anyhow::Result<Vec<u8>> {
-    let mut consumer = Consumer::from_hosts(vec![host.to_string()])
-        .with_topic(topic.to_string())
-        .with_group(format!("test-{}", uuid::Uuid::new_v4()))
-        .with_fallback_offset(FetchOffset::Earliest)
-        .with_offset_storage(GroupOffsetStorage::Kafka.into())
-        .create()?;
+    let consumer = KafkaConsumer::new(
+        vec![host.to_string()],
+        format!("test-{}", uuid::Uuid::new_v4()),
+        &[topic],
+    )?;
 
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
-        for message_set in consumer.poll()?.iter() {
-            if let Some(message) = message_set.messages().first() {
-                return Ok(message.value.to_vec());
-            }
+        if let Some(message) = consumer.poll(Duration::from_millis(500))? {
+            return Ok(message.payload);
         }
     }
 

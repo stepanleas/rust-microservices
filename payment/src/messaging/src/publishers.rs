@@ -18,10 +18,7 @@ pub struct PaymentKafkaPublisher {
 impl PaymentKafkaPublisher {
     pub fn new(hosts: Vec<String>) -> Self {
         Self {
-            producer: Mutex::new(KafkaProducer::new(
-                hosts,
-                &[topics::PAYMENT_CREATED, topics::PAYMENT_UPDATED],
-            )),
+            producer: Mutex::new(KafkaProducer::new(hosts)),
         }
     }
 
@@ -105,7 +102,7 @@ pub struct PaymentOutboxKafkaPublisher {
 impl PaymentOutboxKafkaPublisher {
     pub fn new(hosts: Vec<String>) -> Self {
         Self {
-            producer: Mutex::new(KafkaProducer::new(hosts, &[topics::PAYMENT_RESPONSE])),
+            producer: Mutex::new(KafkaProducer::new(hosts)),
         }
     }
 }

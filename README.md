@@ -206,11 +206,15 @@ restaurant and payment services therefore use the **transactional outbox** patte
    ```
 
 2. An **outbox relay** thread (`OutboxRelay::process_batch`) polls every
-   `OUTBOX_POLL_INTERVAL_MS`. It reads up to `OUTBOX_BATCH_SIZE` `STARTED` rows, oldest first,
-   publishes each one to its topic and marks it `COMPLETED`.
+   `OUTBOX_POLL_INTERVAL_MS`. In one transaction it claims up to `OUTBOX_BATCH_SIZE` `STARTED`
+   rows, oldest first, with `SELECT … FOR UPDATE SKIP LOCKED`, publishes each one to its topic,
+   marks it `COMPLETED` and commits. Every replica runs a relay; rows claimed by one relay are
+   skipped by the others, so scaling out never sends a message twice.
 3. If publishing fails, the row stays `STARTED` and `attempts` is incremented, so the next tick
    retries it. After `OUTBOX_MAX_ATTEMPTS` failures the row is marked `FAILED` and an error is
    logged.
+4. Every 5 minutes the relay deletes `COMPLETED` rows processed more than
+   `OUTBOX_RETENTION_HOURS` ago (in batches of 5,000), so the table stays small under load.
 
 This gives **at-least-once** delivery, so every consumer is **idempotent**:
 
@@ -226,7 +230,9 @@ This gives **at-least-once** delivery, so every consumer is **idempotent**:
 ### Consuming: retries and dead letter topics
 
 Every consuming service runs one listener thread (`shared::kafka::listen`) with one handler that
-dispatches by topic. For each message:
+dispatches by topic. The listener is a member of the service's consumer group (`KAFKA_GROUP_ID`),
+so the replicas of a service split the topics' partitions between them (cooperative-sticky
+rebalancing) instead of each reading every message. For each message:
 
 1. The handler is called. Handlers return errors instead of logging and swallowing them; an
    unknown topic or an undecodable message is an error too.
@@ -236,16 +242,17 @@ dispatches by topic. For each message:
 3. After the last attempt the message is published unchanged (same key) to `<topic>.dlq`, for
    example `payment-response.dlq`, and the listener moves on. The dead letter topics are
    auto-created by the broker.
-4. Offsets are committed only after every message of a poll was handled or dead-lettered, so a
-   crash causes redelivery, never loss.
+4. The message's offset is stored only once it was handled or dead-lettered, and only stored
+   offsets are committed (every second and on rebalance), so a crash causes redelivery, never loss.
 
 A duplicate saga reply for a saga that has moved on is a successful no-op, not an error, so it
 never ends up in a dead letter topic.
 
-The Kafka producers connect lazily and rebuild themselves after a failed send. The `kafka` crate
-fixes a producer's topic partitions when it is created, so this is what lets the relays recover
-when Kafka or a topic only appears after the service started. The consumers retry with
-exponential backoff until Kafka is reachable.
+The Kafka client is librdkafka (`rdkafka`, built from source, so building needs a C toolchain,
+`make` and `perl`). Producers connect lazily and are idempotent with `acks=all`; `send` waits for
+the broker's acknowledgement, so the outbox relays mark a message completed only once Kafka has it.
+A send that cannot be delivered within 10 s fails and the relay retries the row on its next poll.
+Producers also accept record headers (`send_with_headers`), used to propagate trace context.
 
 ---
 
@@ -350,7 +357,8 @@ Each service reads its `.env` file (copy `.env.example`); the defaults point to
 `localhost:<db port>` and `localhost:9092`.
 
 Kafka exposes two listeners: `kafka:29092` for containers and `localhost:9092` for the host.
-Stay on Kafka **3.x**: the `kafka` Rust crate uses protocol versions that were removed in Kafka 4.0.
+Kafka runs as a single KRaft node (`apache/kafka` 4.x). Topics have 12 partitions, so up to 12 replicas
+of a service share the load of its consumer group.
 
 ### Configuration
 
@@ -360,14 +368,54 @@ Stay on Kafka **3.x**: the `kafka` Rust crate uses protocol versions that were r
 | `HTTP_URL`                | per service              | all                        |
 | `DATABASE_URL`            | per service              | all                        |
 | `KAFKA_HOST`              | `localhost:9092`         | all                        |
-| `DB_MAX_CONNECTIONS`      | `16`                     | all                        |
+| `KAFKA_GROUP_ID`          | `order-service-group`    | order (restaurant and payment use a fixed group) |
+| `DB_MAX_CONNECTIONS`      | `16`                     | all (see [Scaling out](#scaling-out)) |
 | `DB_CONNECTION_TIMEOUT_MS`| `5000`                   | all                        |
 | `OUTBOX_POLL_INTERVAL_MS` | `1000`                   | order, restaurant, payment |
 | `OUTBOX_BATCH_SIZE`       | `100`                    | order, restaurant, payment |
 | `OUTBOX_MAX_ATTEMPTS`     | `10`                     | order, restaurant, payment |
+| `OUTBOX_RETENTION_HOURS`  | `24`                     | order, restaurant, payment |
+| `RUST_LOG`                | `info`                   | all                        |
+| `LOG_FORMAT`              | unset (readable)         | all; `json` for one JSON object per line |
 | `MICROSERVICE_<NAME>_URL` | `http://localhost:<port>` | api-gateway (one per service) |
 | `CONNECT_TIMEOUT_MS` / `RESPONSE_TIMEOUT_MS` | `1000` / `10000` | api-gateway |
 | `CB_SLIDING_WINDOW_SIZE`, `CB_FAILURE_RATE_THRESHOLD`, `CB_PERMITTED_CALLS_IN_HALF_OPEN`, `CB_WAIT_IN_OPEN_MS` | `10`, `50`, `2`, `10000` | api-gateway |
+
+### Scaling out
+
+Every service can run several replicas:
+
+* **HTTP**: stateless. `GET /api/health/ready` answers 503 while the database is unreachable,
+  so a load balancer or Kubernetes stops routing to that replica. `live` and `startup` never
+  check dependencies.
+* **Kafka consumers**: the replicas of a service form one consumer group and split the 12
+  partitions of each topic, so up to 12 replicas share the work. A rebalance (replica added or
+  stopped) may redeliver a few messages; the handlers are idempotent.
+* **Outbox relays**: one per replica, coordinated by `FOR UPDATE SKIP LOCKED` (see above).
+* **Graceful shutdown**: on SIGTERM the HTTP server stops accepting connections and finishes
+  in-flight requests (up to 30 s). Then the Kafka listener finishes the message in hand and
+  commits its offsets, and the relay finishes the message it is publishing and commits its batch
+  (up to 15 s). A message still waiting for a retry is left for redelivery instead of being
+  dead-lettered. In Kubernetes, set `terminationGracePeriodSeconds` to at least 50.
+* **Database connections**: r2d2 opens all `DB_MAX_CONNECTIONS` connections of a replica at
+  startup and keeps them. Every request, the Kafka listener and the relay borrow from the same
+  pool, and the relay holds one connection for the duration of a batch. Keep
+
+  ```
+  replicas × DB_MAX_CONNECTIONS  <  max_connections − 3     (Postgres default: 100)
+  ```
+
+  For example, 3 replicas × 16 = 48 fits one default Postgres, while 6 × 16 = 96 does not. In
+  Kubernetes the services use `DB_MAX_CONNECTIONS=10` and connect through PgBouncer, which then
+  bounds the server-side connections instead.
+
+### Logs
+
+The services log through `tracing`. With `LOG_FORMAT=json` every line is a JSON object that
+also carries the fields of the enclosing spans: `correlation_id` for HTTP requests (from the
+`X-Correlation-ID` header, generated when missing), `topic`, `partition`, `offset` and `key` for
+Kafka messages (the key is the order id on the saga topics), and `message_id`, `saga_id` and
+`message_type` for outbox publishes.
 
 ---
 

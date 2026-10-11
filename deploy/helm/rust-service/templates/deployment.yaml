@@ -1,0 +1,91 @@
+{{- $name := include "rust-service.name" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "rust-service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "rust-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "rust-service.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pods when the configuration changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "rust-service.selectorLabels" . | nindent 14 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "rust-service.image" . }}
+          imagePullPolicy: {{ include "rust-service.pullPolicy" . }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}
+          {{- if .Values.database.enabled }}
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.cluster }}-app
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.cluster }}-app
+                  key: password
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.cluster }}-app
+                  key: dbname
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@{{ .Values.database.cluster }}-pooler:5432/$(DB_NAME)"
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.startupPath }}
+              port: http
+            periodSeconds: 2
+            failureThreshold: 90
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.livenessPath }}
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readinessPath }}
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              # Let endpoints and the gateways drop the pod before it stops accepting requests.
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

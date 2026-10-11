@@ -26,22 +26,6 @@ build_dev_images:
 	end=$$(date +%s); \
 	echo "✅ Concurrent build took $$((end - start)) seconds."
 
-build_dev_images:
-	@start=$$(date +%s); \
-	for service in $(services); do \
-		( \
-			echo "==== Building $$service ===="; \
-			cd $$service && docker build -f Dockerfile-dev -t artellas/rust-$$service:dev . && cd - > /dev/null; \
-		) & \
-	done; \
-	( \
-		echo "==== Building gateway ===="; \
-		cd spring-boot-api-gateway && mvn clean compile jib:dockerBuild && cd - > /dev/null; \
-	) & \
-	wait; \
-	end=$$(date +%s); \
-	echo "✅ Concurrent build took $$((end - start)) seconds."
-
 remove_images:
 	@for service in $(services); do \
 		( \
@@ -100,3 +84,27 @@ e2e_scaled:
 	PAYMENT_START_CMD="$(compose_scaled) start payment" \
 	./scripts/e2e-saga.sh
 
+# --- Kubernetes on kind (deploy/) -------------------------------------------------------------
+# make kind_tool kind_up kind_images kind_deploy kind_e2e
+
+# Downloads the kind version pinned in deploy/platform/versions.yaml to .tools/bin.
+kind_tool:
+	./deploy/scripts/kind-tool.sh
+
+# Cluster (1 control plane + 2 workers) + platform operators (metrics-server, CNPG, Strimzi, Envoy Gateway).
+kind_up:
+	./deploy/scripts/kind-up.sh
+
+# Builds the 6 images (tag local) and loads them into kind; SKIP_BUILD=1 only loads.
+kind_images:
+	./deploy/scripts/kind-load.sh
+
+kind_deploy:
+	./deploy/scripts/kind-deploy.sh
+
+kind_e2e:
+	BASE_URL=http://localhost:$${KIND_HTTP_PORT:-8088} TARGET=k8s KAFKA_HOST=localhost:$${KIND_KAFKA_PORT:-9093} \
+		./scripts/e2e-saga.sh
+
+kind_down:
+	./deploy/scripts/kind-down.sh

@@ -1,0 +1,2 @@
+# Strimzi operator; the Kafka cluster and topics are in the rust-microservices chart.
+watchAnyNamespace: true

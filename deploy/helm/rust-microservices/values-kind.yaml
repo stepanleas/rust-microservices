@@ -1,0 +1,25 @@
+# kind (deploy/scripts/kind-up.sh): images loaded with `kind load`, small footprint.
+global:
+  image:
+    tag: local
+    pullPolicy: Never
+  environment: kind
+
+kafka:
+  storageSize: 2Gi
+  # The e2e script's fail_payment helper reaches Kafka from the host (localhost:9093).
+  external:
+    enabled: true
+    nodeSelector:
+      ingress-ready: "true"
+
+postgres:
+  storageSize: 1Gi
+
+catalog: &small
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 3}
+customer: *small
+order: *small
+restaurant: *small
+payment: *small
+api-gateway: *small

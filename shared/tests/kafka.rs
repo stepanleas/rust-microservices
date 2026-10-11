@@ -232,3 +232,63 @@ async fn test_listener_moves_failing_messages_to_the_dead_letter_topic() -> anyh
     })
     .await?
 }
+
+struct Recording {
+    handled: Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+}
+
+impl MessageHandler for Recording {
+    fn topics(&self) -> Vec<&'static str> {
+        vec!["late"]
+    }
+
+    fn handle(&self, _: &str, payload: &[u8]) -> anyhow::Result<()> {
+        self.handled.lock().unwrap().push(payload.to_vec());
+        Ok(())
+    }
+}
+
+/// In Kubernetes a service often starts before Kafka. The errors librdkafka queues meanwhile
+/// must not keep the listener from consuming once Kafka is up.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_listener_consumes_once_a_late_kafka_is_up() -> anyhow::Result<()> {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port();
+    let host = format!("127.0.0.1:{port}");
+    let handled = Arc::new(std::sync::Mutex::new(vec![]));
+
+    let listener_host = host.clone();
+    let recording = Recording {
+        handled: handled.clone(),
+    };
+    std::thread::spawn(move || {
+        shared::kafka::listen(
+            vec![listener_host],
+            group(),
+            Arc::new(recording),
+            RetryPolicy::default(),
+            &Shutdown::new(),
+        )
+    });
+
+    // Let the listener collect connection errors for a while.
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let _kafka = Kafka::default()
+        .with_tag(KAFKA_VERSION)
+        .with_mapped_port(port, KAFKA_PORT)
+        .start()
+        .await?;
+    create_topic(&host, "late", 1).await?;
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        KafkaProducer::new(vec![host]).send("late", "key", b"hello")?;
+        while handled.lock().unwrap().is_empty() {
+            anyhow::ensure!(Instant::now() < deadline, "listener did not consume");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        Ok(())
+    })
+    .await?
+}

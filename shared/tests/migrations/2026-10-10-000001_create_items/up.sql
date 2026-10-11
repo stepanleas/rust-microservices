@@ -1,0 +1,2 @@
+CREATE TABLE items (id INT PRIMARY KEY);
+SELECT pg_sleep(0.5);

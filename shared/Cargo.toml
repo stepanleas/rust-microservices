@@ -49,6 +49,10 @@ testcontainers-modules = { version = "0.15.0", features = ["kafka", "postgres"] 
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 
 [[test]]
+name = "db"
+required-features = ["db"]
+
+[[test]]
 name = "kafka"
 required-features = ["kafka"]
 

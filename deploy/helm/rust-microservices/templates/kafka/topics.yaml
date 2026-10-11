@@ -1,0 +1,19 @@
+{{- $kafka := .Values.kafka -}}
+{{- $topics := $kafka.topics -}}
+{{- range $kafka.deadLetterTopics }}
+{{- $topics = append $topics (printf "%s.dlq" .) }}
+{{- end }}
+{{- range $topics }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  # Resource names can't contain dots.
+  name: {{ . | replace "." "-" }}
+  labels:
+    strimzi.io/cluster: {{ $kafka.name }}
+spec:
+  topicName: {{ . }}
+  partitions: {{ $kafka.partitions }}
+  replicas: 1
+{{- end }}

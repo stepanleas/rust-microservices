@@ -1,0 +1,2 @@
+# Resource metrics for `kubectl top` and the HorizontalPodAutoscalers.
+args: []

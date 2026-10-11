@@ -2,7 +2,7 @@ use diesel::PgConnection;
 use diesel::RunQueryDsl;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
@@ -15,20 +15,70 @@ pub struct DbSettings {
     pub connection_timeout: Duration,
 }
 
-/// Builds the pool and applies the pending migrations. Blocking: call it before the async
-/// runtime starts serving, or from `spawn_blocking`.
-pub fn connect(settings: &DbSettings, migrations: EmbeddedMigrations) -> anyhow::Result<DbPool> {
-    let manager = ConnectionManager::<PgConnection>::new(settings.url.as_str());
-    let pool = Pool::builder()
-        .max_size(settings.max_connections)
-        .connection_timeout(settings.connection_timeout)
-        .build(manager)?;
+/// How long [`connect`] keeps retrying while the database is unreachable, e.g. while Postgres
+/// is still starting next to the service in Kubernetes. Keeps the pod waiting (not ready)
+/// instead of crash-looping with a growing restart back-off.
+pub const STARTUP_RETRY_WINDOW: Duration = Duration::from_secs(120);
 
-    pool.get()?
-        .run_pending_migrations(migrations)
-        .map_err(|error| anyhow::anyhow!("Failed to run database migrations: {error}"))?;
+/// Builds the pool and applies the pending migrations, retrying the connection for up to
+/// [`STARTUP_RETRY_WINDOW`]. Blocking: call it before the async runtime starts serving, or from
+/// `spawn_blocking`.
+pub fn connect(settings: &DbSettings, migrations: EmbeddedMigrations) -> anyhow::Result<DbPool> {
+    connect_retrying(settings, migrations, STARTUP_RETRY_WINDOW)
+}
+
+/// [`connect`] with a custom retry window. Only connection failures are retried; a failing
+/// migration is returned right away.
+pub fn connect_retrying(
+    settings: &DbSettings,
+    migrations: EmbeddedMigrations,
+    window: Duration,
+) -> anyhow::Result<DbPool> {
+    let deadline = Instant::now() + window;
+    let mut backoff = Duration::from_secs(1);
+
+    let pool = loop {
+        let manager = ConnectionManager::<PgConnection>::new(settings.url.as_str());
+        let built = Pool::builder()
+            .max_size(settings.max_connections)
+            .connection_timeout(settings.connection_timeout)
+            .build(manager);
+
+        match built {
+            Ok(pool) => break pool,
+            Err(error) if Instant::now() + backoff < deadline => {
+                tracing::warn!("Database not reachable yet: {error}. Retrying in {backoff:?}");
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(Duration::from_secs(10));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    };
+
+    run_migrations(&mut *pool.get()?, migrations)?;
 
     Ok(pool)
+}
+
+/// Key of the advisory lock that serializes migrations (any constant works, one per database).
+const MIGRATIONS_LOCK: i64 = 0x6d69_6772_6174_6521;
+
+/// Applies the pending migrations while holding a session advisory lock, so replicas starting
+/// at the same time apply them one after the other instead of racing on the same `CREATE TABLE`.
+/// Needs a session-level connection: through PgBouncer, use `pool_mode = session`.
+fn run_migrations(
+    connection: &mut PgConnection,
+    migrations: EmbeddedMigrations,
+) -> anyhow::Result<()> {
+    diesel::sql_query(format!("SELECT pg_advisory_lock({MIGRATIONS_LOCK})")).execute(connection)?;
+    let result = connection
+        .run_pending_migrations(migrations)
+        .map(|_| ())
+        .map_err(|error| anyhow::anyhow!("Failed to run database migrations: {error}"));
+    diesel::sql_query(format!("SELECT pg_advisory_unlock({MIGRATIONS_LOCK})"))
+        .execute(connection)?;
+
+    result
 }
 
 /// Readiness probes time out after 1s by default (Kubernetes `timeoutSeconds`), so give up first.

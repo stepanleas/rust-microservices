@@ -1,0 +1,27 @@
+# Pinned versions of the cluster tooling and platform charts. Read by deploy/scripts/kind-up.sh
+# (and, from Phase 4, by the Argo CD applications), so kind and the homelab run the same versions.
+kind:
+  version: v0.33.0
+  node: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+
+# Installed in this order. `repo` is a Helm repository URL, or the chart itself for OCI charts.
+charts:
+  - name: metrics-server
+    repo: https://kubernetes-sigs.github.io/metrics-server/
+    chart: metrics-server
+    version: 3.14.0
+    namespace: kube-system
+  - name: cloudnative-pg
+    repo: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    version: 0.29.1
+    namespace: cnpg-system
+  - name: strimzi
+    repo: https://strimzi.io/charts/
+    chart: strimzi-kafka-operator
+    version: 1.2.0
+    namespace: strimzi
+  - name: envoy-gateway
+    repo: oci://docker.io/envoyproxy/gateway-helm
+    version: v1.9.2
+    namespace: envoy-gateway-system

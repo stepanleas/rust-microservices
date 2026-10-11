@@ -265,6 +265,7 @@ rust-microservices/
 ├── api-gateway/     the Rust (axum) API gateway
 ├── .github/workflows/   CI (fmt, clippy, tests per changed crate) and per-service image releases
 ├── docker-compose/  development and production stacks, Kafka topic definitions
+├── deploy/          Kubernetes: Helm charts, platform operator values, kind cluster + scripts
 └── scripts/         end-to-end saga test
 ```
 
@@ -359,6 +360,47 @@ Each service reads its `.env` file (copy `.env.example`); the defaults point to
 Kafka exposes two listeners: `kafka:29092` for containers and `localhost:9092` for the host.
 Kafka runs as a single KRaft node (`apache/kafka` 4.x). Topics have 12 partitions, so up to 12 replicas
 of a service share the load of its consumer group.
+
+### Kubernetes (kind)
+
+The same images run on a local [kind](https://kind.sigs.k8s.io) cluster, deployed with Helm:
+
+```bash
+make kind_tool      # downloads the pinned kind to .tools/bin (versions: deploy/platform/versions.yaml)
+make kind_up        # 1 control plane + 2 workers; metrics-server, CloudNativePG, Strimzi, Envoy Gateway
+make kind_images    # builds the 6 images (tag local) and loads them into the nodes
+make kind_deploy    # helm upgrade --install rust-microservices into namespace shop
+make kind_e2e       # the saga test through the gateway
+make kind_down
+```
+
+Needs Docker with about 6 CPUs and 12–16 GB of memory. Everything is reached through Envoy
+Gateway on `http://localhost:8088` (`KIND_HTTP_PORT`), e.g.
+`curl localhost:8088/shop/catalog/api/categories`; Kafka's external listener is on
+`localhost:9093` (`KIND_KAFKA_PORT`) for tools on the host.
+
+```
+deploy/
+├── kind/cluster.yaml            nodes, node image and host port mappings
+├── platform/                    operators shared by kind and (later) the homelab
+│   ├── versions.yaml            pinned kind + chart versions, install order
+│   └── <component>/values*.yaml metrics-server, cloudnative-pg, strimzi, envoy-gateway
+├── helm/
+│   ├── rust-service/            one service: Deployment, Service, ConfigMap, HPA, PDB, probes
+│   └── rust-microservices/      umbrella: rust-service aliased per service, CNPG Cluster + Pooler
+│                                per service, Strimzi Kafka (1 KRaft node) + 22 KafkaTopics,
+│                                Gateway + HTTPRoute -> api-gateway
+└── scripts/                     kind-up / kind-load / kind-deploy / kind-down
+```
+
+* Every service runs 2 replicas (HPA on CPU, 2–3 on kind), with a PodDisruptionBudget,
+  rolling updates without unavailability, and probes on `/api/health/{startup,live,ready}`.
+* Each service has its own Postgres (CloudNativePG `<service>-db`) reached through a PgBouncer
+  `Pooler` in session mode; `DATABASE_URL` is assembled from the operator's `<service>-db-app`
+  secret. Replicas starting together apply the migrations one at a time (advisory lock in
+  `shared::db::connect`).
+* Kafka is a Strimzi `Kafka` with one dual-role KRaft node; topics (12 partitions) and the
+  `.dlq` topics are `KafkaTopic` resources.
 
 ### Configuration
 
@@ -502,8 +544,3 @@ make e2e                    # whole system, against running services
 
 * **catalog and customer publish directly** to Kafka after committing (no outbox yet). A publish
   failure there leaves the order/restaurant replicas behind until the next update.
-* Outbox rows are kept after publishing. A periodic cleanup of old `COMPLETED` rows would bound
-  the table size.
-* The relay assumes one instance per service. Several instances would only cause duplicate
-  sends, which the idempotent consumers absorb. To avoid them entirely, use
-  `SELECT … FOR UPDATE SKIP LOCKED`.

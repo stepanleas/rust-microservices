@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rust-service.name" . }}
+  labels:
+    {{- include "rust-service.labels" . | nindent 4 }}
+data:
+  HTTP_URL: "0.0.0.0:{{ .Values.port }}"
+  {{- if .Values.database.enabled }}
+  DB_MAX_CONNECTIONS: {{ .Values.database.maxConnections | quote }}
+  {{- end }}
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ tpl (toString $value) $ | quote }}
+  {{- end }}

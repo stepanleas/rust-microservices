@@ -68,23 +68,16 @@ pub fn listen(
     let mut dead_letters = KafkaProducer::new(hosts);
 
     tracing::info!("Kafka listener started for topics {:?}", topics);
-    let mut poll_backoff = Duration::from_secs(1);
 
     while !shutdown.is_triggered() {
         let message = match consumer.poll(POLL_TIMEOUT) {
-            Ok(Some(message)) => {
-                poll_backoff = Duration::from_secs(1);
-                message
-            }
+            Ok(Some(message)) => message,
             Ok(None) => continue,
+            // librdkafka reports connection problems as events through poll and reconnects on
+            // its own. Keep polling: errors queued while Kafka was down are drained quickly,
+            // and the consumer group protocol only progresses while poll is called.
             Err(error) => {
-                tracing::warn!(
-                    "Kafka poll failed: {}. Retrying in {:?}...",
-                    error,
-                    poll_backoff
-                );
-                shutdown.sleep(poll_backoff);
-                poll_backoff = (poll_backoff * 2).min(Duration::from_secs(30));
+                tracing::warn!("Kafka poll error: {}", error);
                 continue;
             }
         };

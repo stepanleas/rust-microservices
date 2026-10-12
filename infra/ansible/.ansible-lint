@@ -1,0 +1,7 @@
+# Used by `ansible-lint` here and by the infra workflow (Phase 4).
+offline: true
+skip_list:
+  # Task names start with the tool they run (kubeadm, containerd, vagrant-libvirt, ...).
+  - name[casing]
+  # Registered results are short-lived and local to their role.
+  - var-naming[no-role-prefix]

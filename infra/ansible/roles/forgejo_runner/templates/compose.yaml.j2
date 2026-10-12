@@ -1,0 +1,17 @@
+# Managed by Ansible (forgejo_runner role). `make lab_quiet` stops it during load tests.
+services:
+  forgejo-runner:
+    image: {{ forgejo_runner_image }}
+    container_name: forgejo-runner
+    restart: unless-stopped
+    user: "0:0"
+    command: ["forgejo-runner", "daemon", "--config", "/data/config.yml"]
+    working_dir: /data
+    volumes:
+      - ./data:/data
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+networks:
+  default:
+    name: lab
+    external: true

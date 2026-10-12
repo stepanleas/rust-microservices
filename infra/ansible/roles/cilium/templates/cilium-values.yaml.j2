@@ -1,0 +1,24 @@
+# Cilium as CNI and kube-proxy replacement; LoadBalancer IPs from LB-IPAM, announced over ARP.
+kubeProxyReplacement: true
+# Without kube-proxy there is no `kubernetes` Service yet: talk to the API server directly.
+k8sServiceHost: {{ lab_cp_ip }}
+k8sServicePort: 6443
+ipam:
+  mode: kubernetes
+l2announcements:
+  enabled: true
+externalIPs:
+  enabled: true
+# L2 announcements hold one lease per Service: raise the API client limits accordingly.
+k8sClientRateLimit:
+  qps: 20
+  burst: 40
+operator:
+  replicas: 1
+hubble:
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+prometheus:
+  enabled: true

@@ -1,0 +1,19 @@
+# Managed by Ansible (dnsmasq role).
+bind-interfaces
+listen-address={{ lab_ip }}
+no-resolv
+# Upstream: the resolver of vagrant-libvirt's NAT management network.
+server={{ ansible_default_ipv4.gateway }}
+domain-needed
+bogus-priv
+cache-size=1000
+
+# Never forward lab names upstream. Anything not listed below is served by the cluster ingress.
+local=/{{ lab_domain }}/
+address=/{{ lab_domain }}/{{ lab.network.ingress_ip }}
+{% for name in ops_hostnames %}
+host-record={{ name }}.{{ lab_domain }},{{ lab_ops_ip }}
+{% endfor %}
+{% for vm in lab.vms if vm.name != 'ops' %}
+host-record={{ vm.name }}.{{ lab_domain }},{{ vm.ip }}
+{% endfor %}

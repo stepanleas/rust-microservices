@@ -1,0 +1,11 @@
+# Also imported on its own by playbooks that need lab_iface without the full baseline.
+- name: Interface carrying the lab network
+  ansible.builtin.set_fact:
+    lab_iface: >-
+      {{ ansible_interfaces
+         | map('regex_replace', '-', '_')
+         | map('extract', ansible_facts)
+         | selectattr('ipv4', 'defined')
+         | selectattr('ipv4.address', 'equalto', lab_ip)
+         | map(attribute='device')
+         | first }}

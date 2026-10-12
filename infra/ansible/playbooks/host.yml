@@ -1,0 +1,17 @@
+# One-time setup of this machine (sudo): `make lab_host`.
+- name: Lab CA
+  hosts: localhost
+  roles: [lab_ca]
+
+- name: KVM/libvirt, Vagrant, lab network, split DNS, CA trust
+  hosts: localhost
+  become: true
+  vars:
+    lab_user: "{{ lookup('env', 'USER') }}"
+  roles: [lab_host]
+
+- name: vagrant-libvirt and browser trust
+  hosts: localhost
+  vars:
+    vagrant_libvirt_version: 0.12.2
+  roles: [lab_host_user]

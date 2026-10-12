@@ -1,0 +1,18 @@
+# Host metrics of the ops VM, scraped by Prometheus in the cluster (Phase 5). The Kubernetes
+# nodes get node-exporter from kube-prometheus-stack instead.
+- name: Directory
+  ansible.builtin.file:
+    path: /opt/lab/node-exporter
+    state: directory
+    mode: "0755"
+
+- name: Compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /opt/lab/node-exporter/compose.yaml
+    mode: "0644"
+
+- name: Running
+  community.docker.docker_compose_v2:
+    project_src: /opt/lab/node-exporter
+    state: present

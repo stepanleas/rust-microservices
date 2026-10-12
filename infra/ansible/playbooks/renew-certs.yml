@@ -1,0 +1,43 @@
+# kubeadm's certificates expire after one year (`kubeadm upgrade` also renews them). Renews all of
+# them, restarts the control plane static pods one by one, and refreshes ~/.kube/lab.yaml.
+- name: Renew the control plane certificates
+  hosts: control_plane
+  become: true
+  tasks:
+    - name: Expiration before
+      ansible.builtin.command: kubeadm certs check-expiration
+      register: certs_before
+      changed_when: false
+
+    - name: Show
+      ansible.builtin.debug:
+        var: certs_before.stdout_lines
+
+    - name: Renew all
+      ansible.builtin.command: kubeadm certs renew all
+      changed_when: true
+
+    # Static pods only pick up new certificates on restart; moving a manifest out and back is
+    # the documented way to restart one.
+    - name: Restart control plane pods
+      ansible.builtin.shell: |
+        set -e
+        mv /etc/kubernetes/manifests/{{ item }}.yaml /etc/kubernetes/{{ item }}.yaml
+        sleep 20
+        mv /etc/kubernetes/{{ item }}.yaml /etc/kubernetes/manifests/{{ item }}.yaml
+        for i in $(seq 1 60); do
+          [ -n "$(crictl ps --name '^{{ item }}$' --state running -q)" ] && exit 0
+          sleep 2
+        done
+        exit 1
+      loop: [etcd, kube-apiserver, kube-controller-manager, kube-scheduler]
+      changed_when: true
+
+    - name: Read the renewed admin kubeconfig
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      register: kubeadm_admin_conf
+
+- name: Refresh ~/.kube/lab.yaml
+  hosts: localhost
+  roles: [lab_kubeconfig]

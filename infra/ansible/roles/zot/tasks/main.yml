@@ -1,0 +1,37 @@
+# Two Zot instances: `zot` is the lab registry (anonymous pulls, pushes by the CI user), and
+# `zot-mirror` is a pull-through cache of docker.io for containerd and Docker.
+- name: Directories
+  ansible.builtin.file:
+    path: "/opt/lab/zot/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["", registry, mirror]
+
+- name: CI user
+  community.general.htpasswd:
+    path: /opt/lab/zot/htpasswd
+    name: "{{ registry_ci_user }}"
+    password: "{{ vault_registry_ci_password }}"
+    hash_scheme: bcrypt
+    mode: "0644"
+  register: zot_users
+
+- name: Configs
+  ansible.builtin.template:
+    src: "{{ item }}.json.j2"
+    dest: "/opt/lab/zot/{{ item }}.json"
+    mode: "0644"
+  loop: [registry, mirror]
+  register: zot_configs
+
+- name: Compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /opt/lab/zot/compose.yaml
+    mode: "0644"
+
+- name: Running
+  community.docker.docker_compose_v2:
+    project_src: /opt/lab/zot
+    state: present
+    recreate: "{{ 'always' if (zot_users.changed or zot_configs.changed) else 'auto' }}"

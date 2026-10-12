@@ -1,0 +1,27 @@
+# kubeadm join, skipped once the node has joined. The control plane hands out a fresh token on
+# every run, so the join config is only written when it is used, and removed afterwards.
+- name: Joined already
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Join the cluster
+  when: not kubelet_conf.stat.exists
+  vars:
+    control_plane: "{{ hostvars[groups['control_plane'][0]] }}"
+  block:
+    - name: Join config
+      ansible.builtin.template:
+        src: kubeadm-join.yaml.j2
+        dest: /etc/kubernetes/kubeadm-join.yaml
+        mode: "0600"
+
+    - name: kubeadm join
+      ansible.builtin.command: kubeadm join --config /etc/kubernetes/kubeadm-join.yaml
+      changed_when: true
+
+  always:
+    - name: Remove the join config (it holds a bootstrap token)
+      ansible.builtin.file:
+        path: /etc/kubernetes/kubeadm-join.yaml
+        state: absent

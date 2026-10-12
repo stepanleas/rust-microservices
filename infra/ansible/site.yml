@@ -1,0 +1,8 @@
+# Everything after `vagrant up`: `make lab_provision` (or `make lab_up`). Idempotent: a second
+# run reports changed=0. The host setup (sudo) is separate: playbooks/host.yml.
+- name: Baseline
+  import_playbook: playbooks/common.yml
+- name: Ops VM
+  import_playbook: playbooks/ops.yml
+- name: Kubernetes
+  import_playbook: playbooks/kubernetes.yml

@@ -266,6 +266,7 @@ rust-microservices/
 ├── .github/workflows/   CI (fmt, clippy, tests per changed crate) and per-service image releases
 ├── docker-compose/  development and production stacks, Kafka topic definitions
 ├── deploy/          Kubernetes: Helm charts, platform operator values, kind cluster + scripts
+├── infra/           homelab: Vagrant VMs + Ansible (ops VM, kubeadm cluster), see infra/README.md
 └── scripts/         end-to-end saga test
 ```
 
@@ -401,6 +402,20 @@ deploy/
   `shared::db::connect`).
 * Kafka is a Strimzi `Kafka` with one dual-role KRaft node; topics (12 partitions) and the
   `.dlq` topics are `KafkaTopic` resources.
+
+### Kubernetes (homelab)
+
+A prod-like environment of four KVM VMs managed by Vagrant and Ansible. The `ops` VM runs DNS, a
+CA, the Zot registry, and Forgejo with an Actions runner. Three more VMs form a kubeadm cluster
+with Cilium, which also hands out LoadBalancer IPs.
+
+```bash
+make lab_tools lab_host     # once: Ansible in .tools/, then libvirt/Vagrant on this machine (sudo)
+make lab_up lab_verify      # VMs + provisioning, then the health checks
+```
+
+Needs about 23 GB of free RAM, so stop kind first. Details, day-2 operations and
+troubleshooting: [infra/README.md](infra/README.md).
 
 ### Configuration
 

@@ -1,0 +1,47 @@
+# Single source of the homelab topology: read by the Vagrantfile (which VMs to create) and by
+# ansible/inventory/lab.py (which hosts to configure). To move to real hardware, replace the
+# inventory and keep the playbooks.
+domain: lab.internal
+
+network:
+  # Isolated libvirt network, defined by playbooks/host.yml. The VMs reach the internet through
+  # vagrant-libvirt's NAT management network; this one carries all lab traffic.
+  name: lab
+  bridge: virbr-lab
+  cidr: 192.168.56.0/24
+  host_ip: 192.168.56.1
+  # Cilium LB-IPAM hands out LoadBalancer IPs from this range and announces them over ARP.
+  lb_pool_start: 192.168.56.200
+  lb_pool_stop: 192.168.56.220
+  # The Envoy Gateway Service: every other *.lab.internal name resolves here.
+  ingress_ip: 192.168.56.200
+
+box:
+  name: cloud-image/ubuntu-24.04
+  version: 20260926.0.0
+
+vms:
+  - name: ops
+    ip: 192.168.56.10
+    cpus: 4
+    memory: 6144
+    disk: 80
+    groups: [ops_vm]
+  - name: k8s-cp
+    ip: 192.168.56.11
+    cpus: 2
+    memory: 4096
+    disk: 30
+    groups: [kubernetes, control_plane]
+  - name: k8s-w1
+    ip: 192.168.56.12
+    cpus: 4
+    memory: 6656
+    disk: 60
+    groups: [kubernetes, workers]
+  - name: k8s-w2
+    ip: 192.168.56.13
+    cpus: 4
+    memory: 6656
+    disk: 60
+    groups: [kubernetes, workers]

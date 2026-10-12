@@ -1,0 +1,34 @@
+# Runs on the Ansible host against the lab cluster. Cilium is installed here rather than by Argo CD:
+# nodes stay NotReady (and nothing else can run) until a CNI exists.
+- name: Cilium
+  kubernetes.core.helm:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    name: cilium
+    chart_ref: cilium
+    chart_repo_url: https://helm.cilium.io
+    chart_version: "{{ cilium_version }}"
+    release_namespace: kube-system
+    values: "{{ lookup('template', 'cilium-values.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: 10m
+
+# With serverTLSBootstrap the kubelets ask for serving certificates through CSRs; this approves
+# the ones whose names and IPs match the lab nodes. Without it, `kubectl logs/exec` fail.
+- name: kubelet-csr-approver
+  kubernetes.core.helm:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    name: kubelet-csr-approver
+    chart_ref: kubelet-csr-approver
+    chart_repo_url: https://postfinance.github.io/kubelet-csr-approver
+    chart_version: "{{ kubelet_csr_approver_version }}"
+    release_namespace: kube-system
+    values:
+      providerRegex: "^({{ groups['kubernetes'] | join('|') }})$"
+      providerIpPrefixes: ["{{ lab.network.cidr }}"]
+      # The CSRs carry bare node names, which only resolve with the .lab.internal suffix.
+      bypassDnsResolution: true
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+    wait: true

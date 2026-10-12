@@ -1,0 +1,73 @@
+# Backups to ~/.lab/backups/<timestamp>/ on this machine: etcd snapshot + cluster PKI (tag etcd,
+# `make lab_etcd_backup`) and a Forgejo dump (tag forgejo). The CA and the vault password are
+# already in ~/.lab. Phase 4 adds the Sealed Secrets key.
+- name: Backup directory
+  hosts: localhost
+  tags: [always]
+  tasks:
+    - name: Timestamp
+      ansible.builtin.set_fact:
+        backup_dir: "{{ lab_dir }}/backups/{{ now(fmt='%Y%m%d-%H%M%S') }}"
+
+    - name: Directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0700"
+
+- name: etcd snapshot and PKI
+  hosts: control_plane
+  become: true
+  tags: [etcd]
+  vars:
+    backup_dir: "{{ hostvars.localhost.backup_dir }}"
+  tasks:
+    - name: Snapshot (written to /var/lib/etcd, which the etcd pod mounts)
+      ansible.builtin.shell: |
+        set -e
+        container=$(crictl ps --name '^etcd$' --state running -q)
+        crictl exec "$container" etcdctl --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          snapshot save /var/lib/etcd/backup.db
+        tar -czf /root/pki.tar.gz -C /etc/kubernetes pki
+      changed_when: true
+
+    - name: Fetch
+      ansible.builtin.fetch:
+        src: "{{ item.src }}"
+        dest: "{{ backup_dir }}/{{ item.dest }}"
+        flat: true
+      loop:
+        - {src: /var/lib/etcd/backup.db, dest: etcd.db}
+        - {src: /root/pki.tar.gz, dest: kubernetes-pki.tar.gz}
+
+    - name: Clean up
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/var/lib/etcd/backup.db, /root/pki.tar.gz]
+
+- name: Forgejo dump
+  hosts: ops_vm
+  become: true
+  tags: [forgejo]
+  vars:
+    backup_dir: "{{ hostvars.localhost.backup_dir }}"
+  tasks:
+    - name: Dump (into the data volume)
+      ansible.builtin.command: >-
+        docker exec -u git -w /data forgejo forgejo dump --type tar.gz --file /data/backup.tar.gz
+      changed_when: true
+
+    - name: Fetch
+      ansible.builtin.fetch:
+        src: /opt/lab/forgejo/data/backup.tar.gz
+        dest: "{{ backup_dir }}/forgejo.tar.gz"
+        flat: true
+
+    - name: Clean up
+      ansible.builtin.file:
+        path: /opt/lab/forgejo/data/backup.tar.gz
+        state: absent

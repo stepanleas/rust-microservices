@@ -1,0 +1,87 @@
+# containerd + runc from the upstream releases (Ubuntu's containerd lags behind what current
+# Kubernetes expects). Image pulls go through the Zot mirror on the ops VM.
+- name: Installed containerd version
+  ansible.builtin.command: /usr/local/bin/containerd --version
+  register: containerd_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download containerd
+  ansible.builtin.get_url:
+    url: "{{ containerd_base }}/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
+    checksum: "sha256:{{ containerd_base }}/containerd-{{ containerd_version }}-linux-amd64.tar.gz.sha256sum"
+    dest: "/opt/containerd-{{ containerd_version }}.tar.gz"
+    mode: "0644"
+  vars:
+    containerd_base: "https://github.com/containerd/containerd/releases/download/v{{ containerd_version }}"
+
+- name: Install containerd
+  ansible.builtin.unarchive:
+    src: "/opt/containerd-{{ containerd_version }}.tar.gz"
+    dest: /usr/local
+    remote_src: true
+  when: ('v' ~ containerd_version) not in containerd_installed.stdout
+  notify: Restart containerd
+
+- name: containerd systemd unit
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/containerd/containerd/v{{ containerd_version }}/containerd.service"
+    dest: /etc/systemd/system/containerd.service
+    mode: "0644"
+  notify: Restart containerd
+
+- name: runc
+  ansible.builtin.get_url:
+    url: "https://github.com/opencontainers/runc/releases/download/v{{ runc_version }}/runc.amd64"
+    checksum: "sha256:https://github.com/opencontainers/runc/releases/download/v{{ runc_version }}/runc.sha256sum"
+    dest: /usr/local/sbin/runc
+    mode: "0755"
+
+- name: Config directories
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: [docker.io, "registry.{{ lab_domain }}"]
+
+- name: containerd config
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/containerd/config.toml
+    mode: "0644"
+  notify: Restart containerd
+
+# Read on every pull (no restart needed). docker.io falls back to Docker Hub when Zot is down.
+- name: Registry mirrors
+  ansible.builtin.copy:
+    dest: "/etc/containerd/certs.d/{{ item.registry }}/hosts.toml"
+    content: |
+      # Managed by Ansible (containerd role).
+      server = "{{ item.server }}"
+
+      [host."https://{{ item.mirror }}"]
+        capabilities = ["pull", "resolve"]
+    mode: "0644"
+  loop:
+    - {registry: docker.io, server: "https://registry-1.docker.io", mirror: "mirror.{{ lab_domain }}"}
+    - {registry: "registry.{{ lab_domain }}", server: "https://registry.{{ lab_domain }}", mirror: "registry.{{ lab_domain }}"}
+  loop_control:
+    label: "{{ item.registry }}"
+
+- name: crictl talks to containerd
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    content: |
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+    mode: "0644"
+
+- name: Running
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply config changes before kubeadm
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,44 @@
+# Docker on the ops VM: runs every ops service (compose) and the CI runner's job containers.
+- name: Packages
+  ansible.builtin.apt:
+    name: [docker.io, docker-compose-v2, docker-buildx, python3-docker, python3-passlib, python3-bcrypt]
+    lock_timeout: 300
+
+# Containers resolve through dnsmasq only, so lab names work inside CI jobs too. docker.io pulls
+# go through the Zot cache once it runs (Docker falls back to docker.io while it doesn't).
+- name: Daemon settings
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ settings | to_nice_json }}\n"
+    mode: "0644"
+  vars:
+    settings:
+      dns: ["{{ lab_ops_ip }}"]
+      registry-mirrors: ["https://mirror.{{ lab_domain }}"]
+      log-driver: local
+  notify: Restart docker
+
+- name: Running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Apply daemon settings before the services start
+  ansible.builtin.meta: flush_handlers
+
+- name: vagrant can use docker
+  ansible.builtin.user:
+    name: vagrant
+    groups: docker
+    append: true
+
+- name: Network shared by Caddy and the services behind it
+  community.docker.docker_network:
+    name: lab
+
+- name: Services root
+  ansible.builtin.file:
+    path: /opt/lab
+    state: directory
+    mode: "0755"

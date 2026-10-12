@@ -1,0 +1,23 @@
+# Wipes the Kubernetes cluster but keeps the VMs: `make lab_k8s_reset` runs this, then
+# kubernetes.yml builds a fresh cluster. Workloads and their volumes are lost.
+- name: kubeadm reset
+  hosts: kubernetes
+  become: true
+  tasks:
+    - name: Reset
+      ansible.builtin.command: kubeadm reset --force
+      changed_when: true
+
+    - name: Leftover CNI config and kubeadm configs
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /etc/kubernetes/kubeadm-config.yaml
+        - /etc/kubernetes/kubeadm-join.yaml
+        - /var/lib/etcd
+
+    # Cilium's interfaces, BPF maps and iptables rules go away with a reboot.
+    - name: Reboot
+      ansible.builtin.reboot:

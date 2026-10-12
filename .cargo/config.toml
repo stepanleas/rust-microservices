@@ -1,0 +1,13 @@
+# Applies to every workspace under the repo root (cargo searches parent directories).
+# Excluded from image builds by .dockerignore, so release images are unaffected.
+
+# Debug info is most of a dev target dir: keep line tables for our own crates (backtraces still
+# show file:line), drop it for dependencies.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"

@@ -1,0 +1,115 @@
+# CI settings of the lab repository. The workflows in .github/workflows are shared with GitHub;
+# everything lab-specific comes from these repository variables and secrets.
+- name: Repository variables
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_repo }}/actions/variables/{{ item.key }}"
+    method: GET
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [200, 404]
+  loop: "{{ forgejo_actions_variables | dict2items }}"
+  loop_control: {label: "{{ item.key }}"}
+  register: forgejo_variables
+
+- name: Create or update repository variables
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_repo }}/actions/variables/{{ item.item.key }}"
+    method: "{{ 'POST' if item.status == 404 else 'PUT' }}"
+    body_format: json
+    body: {value: "{{ item.item.value }}"}
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 204]
+  loop: "{{ forgejo_variables.results }}"
+  loop_control: {label: "{{ item.item.key }}"}
+  when: item.status == 404 or item.json.data != item.item.value
+  changed_when: true
+
+# Secret values can't be read back, so a hash of them is kept on this machine: the secrets are
+# (re)written when it changes, or when one is missing in the repository.
+- name: Existing repository secrets
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_repo }}/actions/secrets"
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+  register: forgejo_secrets
+
+- name: Repository secrets
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_repo }}/actions/secrets/{{ item.key }}"
+    method: PUT
+    body_format: json
+    body: {data: "{{ item.value }}"}
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 204]
+  loop: "{{ forgejo_actions_secrets | dict2items }}"
+  loop_control: {label: "{{ item.key }}"}
+  when: >-
+    item.key not in (forgejo_secrets.json | map(attribute='name') | list)
+    or lookup('ansible.builtin.file', forgejo_secrets_hash_file, errors='ignore') != forgejo_secrets_hash
+  no_log: true
+  changed_when: true
+
+- name: Hash of the repository secrets
+  ansible.builtin.copy:
+    dest: "{{ forgejo_secrets_hash_file }}"
+    content: "{{ forgejo_secrets_hash }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+# Git on this machine pushes to the lab with an API token of the admin user (make lab_remote).
+- name: Host token file
+  ansible.builtin.stat:
+    path: "{{ forgejo_host_token_file }}"
+  delegate_to: localhost
+  become: false
+  register: forgejo_token_file
+
+- name: Host token still valid
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/user"
+    headers: {Authorization: "token {{ lookup('file', forgejo_host_token_file) }}"}
+    status_code: [200, 401]
+  when: forgejo_token_file.stat.exists
+  register: forgejo_token_check
+  no_log: true
+
+- name: New host token
+  when: not forgejo_token_file.stat.exists or forgejo_token_check.status != 200
+  block:
+    - name: Remove the old host token
+      ansible.builtin.uri:
+        url: "{{ forgejo_url }}/api/v1/users/{{ forgejo_admin_user }}/tokens/{{ forgejo_host_token_name }}"
+        method: DELETE
+        url_username: "{{ forgejo_admin_user }}"
+        url_password: "{{ vault_forgejo_admin_password }}"
+        force_basic_auth: true
+        status_code: [204, 404, 422]
+
+    - name: Create the host token
+      ansible.builtin.uri:
+        url: "{{ forgejo_url }}/api/v1/users/{{ forgejo_admin_user }}/tokens"
+        method: POST
+        body_format: json
+        body: {name: "{{ forgejo_host_token_name }}", scopes: [write:repository, read:user]}
+        url_username: "{{ forgejo_admin_user }}"
+        url_password: "{{ vault_forgejo_admin_password }}"
+        force_basic_auth: true
+        status_code: [201]
+      register: forgejo_new_token
+      no_log: true
+
+    - name: Save the host token
+      ansible.builtin.copy:
+        dest: "{{ forgejo_host_token_file }}"
+        content: "{{ forgejo_new_token.json.sha1 }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      no_log: true

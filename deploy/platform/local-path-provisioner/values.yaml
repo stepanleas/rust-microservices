@@ -1,0 +1,8 @@
+# Homelab storage: volumes are directories on the node that runs the pod (kind has its own). A
+# pod with a volume stays on its node, so draining that node waits for the pod to come back.
+storageClass:
+  defaultClass: true
+  name: local-path
+nodePathMap:
+  - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
+    paths: [/opt/local-path-provisioner]

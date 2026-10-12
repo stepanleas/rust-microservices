@@ -1,0 +1,95 @@
+name: infra
+
+# Static checks of the homelab and Kubernetes code, on GitHub and on the lab's Forgejo alike.
+on:
+  push:
+    branches:
+      - main
+      - feature/*
+      - fix/*
+    paths:
+      - "infra/**"
+      - "deploy/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      - "deploy/**"
+      - ".github/workflows/infra.yml"
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUBECONFORM_VERSION: v0.8.0
+  HELM_VERSION: v4.3.0
+
+jobs:
+  ansible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The same pinned Ansible + ansible-lint as `make lab_tools`.
+      - name: Install Ansible
+        run: ./infra/scripts/lab-tools.sh
+
+      # CI never sees the vault password: a dummy one lets the syntax checks run, and the vault
+      # itself is skipped as undecryptable.
+      - name: ansible-lint
+        working-directory: infra/ansible
+        run: |
+          echo not-the-vault-password > "$RUNNER_TEMP/vault-pass"
+          ANSIBLE_VAULT_PASSWORD_FILE="$RUNNER_TEMP/vault-pass" ../../.tools/ansible/bin/ansible-lint
+
+  kubernetes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm and kubeconform
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" \
+            | tar -xz -C "$bin" --strip-components 1 linux-amd64/helm
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C "$bin" kubeconform
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: helm lint
+        working-directory: deploy/helm
+        run: |
+          helm dependency build rust-microservices
+          for values in rust-microservices/values-*.yaml; do
+            helm lint rust-microservices -f "$values"
+          done
+          helm lint rust-service
+          helm lint ../argocd
+
+      # Validates against the Kubernetes version of the lab, and the operators' CRDs (Kafka,
+      # CNPG Cluster, Gateway, Argo CD Application, ...) against the community schema catalog.
+      - name: kubeconform
+        run: |
+          version=$(sed -n 's/^kubernetes_version: //p' infra/ansible/inventory/group_vars/all/main.yml)
+          validate() {
+            kubeconform -strict -summary -kubernetes-version "$version" \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              "$@"
+          }
+          for values in deploy/helm/rust-microservices/values-*.yaml; do
+            echo "== $values"
+            helm template rust-microservices deploy/helm/rust-microservices -f "$values" | validate -
+          done
+          echo "== deploy/argocd"
+          helm template lab-apps deploy/argocd | validate -
+          echo "== deploy/platform/*/{kind,lab}"
+          validate deploy/platform/*/kind deploy/platform/*/lab

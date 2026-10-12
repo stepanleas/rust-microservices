@@ -28,7 +28,11 @@ node_exporter_image: prom/node-exporter:v1.12.1
 
 # Names served by the ops VM; every other *.lab.internal name points at the ingress IP.
 ops_hostnames: [ops, git, registry, mirror, ntfy]
+forgejo_url: "https://git.{{ lab_domain }}"
 forgejo_admin_user: lab-admin
 forgejo_org: shop
 forgejo_repo: rust-microservices
-registry_ci_user: ci
+# The lab's deploy state (image tags) for Argo CD, written by the release workflow.
+forgejo_env_repo: lab-env
+# Pushes to the lab registry. Forgejo masks secret values in job logs, so not a common word.
+registry_ci_user: forgejo-ci

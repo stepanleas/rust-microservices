@@ -136,6 +136,15 @@ lab_provision:
 lab_verify:
 	./infra/scripts/lab-verify.sh
 
+# Argo CD + the root Application (also part of lab_provision). REVISION=<branch> makes the lab
+# follow a branch instead of main, e.g. to try it before merging.
+lab_bootstrap:
+	$(lab_ansible) ansible-playbook playbooks/argocd.yml $(if $(REVISION),-e argocd_revision=$(REVISION))
+
+# A SealedSecret for the lab, safe to commit: make seal NAME=… NS=… FROM=<KEY=value file> [OUT=…]
+seal:
+	NAME=$(NAME) NS=$(NS) FROM=$(FROM) OUT=$(OUT) ./deploy/scripts/seal.sh
+
 lab_status:
 	@$(lab_vagrant) status
 	@kubectl --kubeconfig $$HOME/.kube/lab.yaml get nodes -o wide 2>/dev/null || echo "cluster unreachable"

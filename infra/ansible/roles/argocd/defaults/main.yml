@@ -1,0 +1,9 @@
+# Branch of the lab repository that Argo CD follows: make lab_bootstrap REVISION=<branch> to try a
+# branch on the lab before it is merged.
+argocd_revision: main
+argocd_repo_url: "https://git.{{ lab_domain }}/{{ forgejo_org }}/{{ forgejo_repo }}.git"
+argocd_env_repo_url: "https://git.{{ lab_domain }}/{{ forgejo_org }}/{{ forgejo_env_repo }}.git"
+argocd_namespace: argocd
+# deploy/platform/charts.yaml pins the Argo CD chart, like every other platform chart.
+argocd_repo_root: "{{ inventory_dir | dirname | dirname | dirname }}"
+argocd_chart: "{{ lookup('file', argocd_repo_root ~ '/deploy/platform/charts.yaml') | from_yaml | selectattr('name', 'eq', 'argo-cd') | first }}"

@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 DEPLOY_DIR="$ROOT_DIR/deploy"
 VERSIONS="$DEPLOY_DIR/platform/versions.yaml"
+CHARTS="$DEPLOY_DIR/platform/charts.yaml"
 
 CLUSTER_NAME=${CLUSTER_NAME:-rust-microservices}
 NAMESPACE=${NAMESPACE:-shop}

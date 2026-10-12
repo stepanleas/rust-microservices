@@ -1,0 +1,63 @@
+{{- range $chart := .Files.Get "charts.yaml" | fromYamlArray }}
+{{- if ne (toString (dig "lab" true $chart)) "false" }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $chart.name }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ dig "wave" "-2" $chart | quote }}
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $chart.namespace }}
+  sources:
+    {{- if hasPrefix "oci://" $chart.repo }}
+    # Helm chart in an OCI registry: repository = everything up to the chart name.
+    - repoURL: {{ trimPrefix "oci://" $chart.repo | dir }}
+      chart: {{ base $chart.repo }}
+    {{- else if hasKey $chart "path" }}
+    - repoURL: {{ $chart.repo }}
+      path: {{ $chart.path }}
+    {{- else }}
+    - repoURL: {{ $chart.repo }}
+      chart: {{ $chart.chart }}
+    {{- end }}
+      targetRevision: {{ $chart.version }}
+      helm:
+        releaseName: {{ $chart.name }}
+        valueFiles:
+          - $values/deploy/platform/{{ $chart.name }}/values.yaml
+          - $values/deploy/platform/{{ $chart.name }}/values-lab.yaml
+        ignoreMissingValueFiles: true
+    - repoURL: {{ $.Values.repoURL }}
+      targetRevision: {{ $.Values.revision }}
+      ref: values
+  {{- with $chart.ignoreDifferences }}
+  ignoreDifferences:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  syncPolicy:
+    {{- include "lab-apps.syncPolicy" $ | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- range $chart := .Files.Get "charts.yaml" | fromYamlArray }}
+{{- if and (hasPrefix "oci://" $chart.repo) (ne (toString (dig "lab" true $chart)) "false") }}
+---
+# Argo CD only pulls Helm charts from an OCI registry that is declared as such.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-{{ $chart.name }}
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  name: {{ $chart.name }}
+  type: helm
+  url: {{ trimPrefix "oci://" $chart.repo | dir }}
+  enableOCI: "true"
+{{- end }}
+{{- end }}

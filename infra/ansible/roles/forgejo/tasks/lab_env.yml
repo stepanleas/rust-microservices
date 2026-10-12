@@ -1,0 +1,118 @@
+# The lab's deploy state: repository shop/lab-env holds images.yaml, the image tags Argo CD runs
+# (deploy/argocd/templates/rust-microservices.yaml). It is a repository of its own because an Argo
+# CD application can't combine two revisions of the same repository, and it keeps bot commits
+# off main. The release workflow's deploy-lab job writes to it as the user lab-deploy, which can
+# write to nothing else.
+- name: Existing users
+  ansible.builtin.command: docker exec -u git forgejo forgejo admin user list
+  register: forgejo_users
+  changed_when: false
+
+- name: Deploy user
+  ansible.builtin.command: >-
+    docker exec -u git forgejo forgejo admin user create --username {{ forgejo_deploy_user }}
+    --email {{ forgejo_deploy_user }}@{{ lab_domain }} --random-password --must-change-password=false
+  when: forgejo_deploy_user not in forgejo_users.stdout.split()
+  changed_when: true
+
+- name: Deploy repository
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/orgs/{{ forgejo_org }}/repos"
+    method: POST
+    body_format: json
+    body: {name: "{{ forgejo_env_repo }}", default_branch: main, auto_init: true}
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 409]
+  register: forgejo_env_repo_result
+  changed_when: forgejo_env_repo_result.status == 201
+
+- name: images.yaml in the deploy repository
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_env_repo }}/contents/images.yaml"
+    method: POST
+    body_format: json
+    body:
+      branch: main
+      message: Start the lab image list
+      content: "{{ forgejo_env_images_header | b64encode }}"
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 422]
+  register: forgejo_env_file
+  changed_when: forgejo_env_file.status == 201
+
+- name: The deploy user may write to the deploy repository
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_env_repo }}/collaborators/{{ forgejo_deploy_user }}"
+    method: GET
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [204, 404]
+  register: forgejo_env_collaborator
+
+- name: Add the deploy user as collaborator
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_env_repo }}/collaborators/{{ forgejo_deploy_user }}"
+    method: PUT
+    body_format: json
+    body: {permission: write}
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [204]
+  when: forgejo_env_collaborator.status == 404
+  changed_when: true
+
+# The token only lives in the Actions secret: when the secret is missing, a new token replaces
+# the old one.
+- name: Existing repository secrets (deploy token)
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_repo }}/actions/secrets"
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+  register: forgejo_secrets_now
+
+- name: New deploy token
+  when: forgejo_deploy_token_secret not in (forgejo_secrets_now.json | map(attribute='name') | list)
+  block:
+    - name: Remove the old deploy token
+      ansible.builtin.uri:
+        url: "{{ forgejo_url }}/api/v1/users/{{ forgejo_deploy_user }}/tokens/{{ forgejo_deploy_user }}"
+        method: DELETE
+        headers: {Sudo: "{{ forgejo_deploy_user }}"}
+        url_username: "{{ forgejo_admin_user }}"
+        url_password: "{{ vault_forgejo_admin_password }}"
+        force_basic_auth: true
+        status_code: [204, 404, 422]
+
+    - name: Create the deploy token
+      ansible.builtin.uri:
+        url: "{{ forgejo_url }}/api/v1/users/{{ forgejo_deploy_user }}/tokens"
+        method: POST
+        headers: {Sudo: "{{ forgejo_deploy_user }}"}
+        body_format: json
+        body: {name: "{{ forgejo_deploy_user }}", scopes: [write:repository]}
+        url_username: "{{ forgejo_admin_user }}"
+        url_password: "{{ vault_forgejo_admin_password }}"
+        force_basic_auth: true
+        status_code: [201]
+      register: forgejo_deploy_token
+      no_log: true
+
+    - name: Deploy token as Actions secret
+      ansible.builtin.uri:
+        url: "{{ forgejo_url }}/api/v1/repos/{{ forgejo_org }}/{{ forgejo_repo }}/actions/secrets/{{ forgejo_deploy_token_secret }}"
+        method: PUT
+        body_format: json
+        body: {data: "{{ forgejo_deploy_token.json.sha1 }}"}
+        url_username: "{{ forgejo_admin_user }}"
+        url_password: "{{ vault_forgejo_admin_password }}"
+        force_basic_auth: true
+        status_code: [201, 204]
+      no_log: true
+      changed_when: true

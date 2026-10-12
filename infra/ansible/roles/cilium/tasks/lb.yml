@@ -1,4 +1,5 @@
-# The LoadBalancer IP pool and where to announce it. Argo CD takes these over in Phase 4.
+# The LoadBalancer IP pool and where to announce it. They stay here rather than in git: the
+# interface name comes from the VM facts and the range from infra/lab.yml.
 - name: LoadBalancer IP pool and L2 announcement policy
   kubernetes.core.k8s:
     kubeconfig: "{{ lab_kubeconfig }}"

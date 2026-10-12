@@ -1,0 +1,6 @@
+# Set by the root Application (infra/ansible/playbooks/bootstrap.yml).
+repoURL: https://git.lab.internal/shop/rust-microservices.git
+# Branch the lab follows for charts, values and these Applications.
+revision: main
+# images.yaml with the image tags the release workflow deploys (its deploy-lab job).
+envRepoURL: https://git.lab.internal/shop/lab-env.git

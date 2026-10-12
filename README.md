@@ -367,7 +367,7 @@ of a service share the load of its consumer group.
 The same images run on a local [kind](https://kind.sigs.k8s.io) cluster, deployed with Helm:
 
 ```bash
-make kind_tool      # downloads the pinned kind to .tools/bin (versions: deploy/platform/versions.yaml)
+make kind_tool      # downloads the pinned kind to .tools/bin (version: deploy/platform/versions.yaml)
 make kind_up        # 1 control plane + 2 workers; metrics-server, CloudNativePG, Strimzi, Envoy Gateway
 make kind_images    # builds the 6 images (tag local) and loads them into the nodes
 make kind_deploy    # helm upgrade --install rust-microservices into namespace shop
@@ -383,15 +383,17 @@ Gateway on `http://localhost:8088` (`KIND_HTTP_PORT`), e.g.
 ```
 deploy/
 ├── kind/cluster.yaml            nodes, node image and host port mappings
-├── platform/                    operators shared by kind and (later) the homelab
-│   ├── versions.yaml            pinned kind + chart versions, install order
-│   └── <component>/values*.yaml metrics-server, cloudnative-pg, strimzi, envoy-gateway
+├── platform/                    operators shared by kind and the homelab
+│   ├── versions.yaml            pinned kind version and node image
+│   ├── charts.yaml              pinned platform charts, install order, which target gets which
+│   └── <component>/             values.yaml (+ values-<target>.yaml), <target>/ manifests
+├── argocd/                      the homelab's Argo CD Applications (app of apps)
 ├── helm/
 │   ├── rust-service/            one service: Deployment, Service, ConfigMap, HPA, PDB, probes
 │   └── rust-microservices/      umbrella: rust-service aliased per service, CNPG Cluster + Pooler
 │                                per service, Strimzi Kafka (1 KRaft node) + 22 KafkaTopics,
-│                                Gateway + HTTPRoute -> api-gateway
-└── scripts/                     kind-up / kind-load / kind-deploy / kind-down
+│                                Gateway + HTTPRoute -> api-gateway; values-kind / values-lab
+└── scripts/                     kind-up / kind-load / kind-deploy / kind-down, seal
 ```
 
 * Every service runs 2 replicas (HPA on CPU, 2–3 on kind), with a PodDisruptionBudget,
@@ -414,7 +416,10 @@ make lab_tools lab_host     # once: Ansible in .tools/, then libvirt/Vagrant on 
 make lab_up lab_verify      # VMs + provisioning, then the health checks
 ```
 
-Needs about 23 GB of free RAM, so stop kind first. Details, day-2 operations and
+Needs about 23 GB of free RAM, so stop kind first. Inside the cluster, Argo CD deploys the
+platform and the shop from the lab's Forgejo, and the same `.github/workflows` that release to
+Docker Hub on GitHub release to the lab registry and deploy there: `git push lab order-v1.4.0`
+ends in a rolling update on https://shop.lab.internal. Details, day-2 operations and
 troubleshooting: [infra/README.md](infra/README.md).
 
 ### Configuration

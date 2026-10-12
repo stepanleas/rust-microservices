@@ -6,3 +6,5 @@
   import_playbook: playbooks/ops.yml
 - name: Kubernetes
   import_playbook: playbooks/kubernetes.yml
+- name: GitOps
+  import_playbook: playbooks/argocd.yml

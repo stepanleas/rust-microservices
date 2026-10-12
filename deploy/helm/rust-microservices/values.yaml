@@ -70,6 +70,9 @@ gateway:
   className: envoy
   # Empty = any hostname (kind: localhost).
   hostname: ""
+  # Attach the route to an existing Gateway instead of creating `shop`, e.g. the homelab's shared
+  # HTTPS Gateway: {name: lab, namespace: envoy-gateway-system, sectionName: https}.
+  parentRef: {}
 
 # Shared by the services (templated with `tpl`).
 x-common-env: &common-env

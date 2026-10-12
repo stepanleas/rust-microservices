@@ -65,3 +65,9 @@
     status_code: [201, 409]
   register: forgejo_repo_result
   changed_when: forgejo_repo_result.status == 201
+
+- name: Actions settings
+  ansible.builtin.import_tasks: actions.yml
+
+- name: Deploy repository
+  ansible.builtin.import_tasks: lab_env.yml

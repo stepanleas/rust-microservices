@@ -5,7 +5,13 @@ services:
     container_name: forgejo-runner
     restart: unless-stopped
     user: "0:0"
-    command: ["forgejo-runner", "daemon", "--config", "/data/config.yml"]
+    # At boot the runner can start before Forgejo answers through Caddy; a runner that declared
+    # itself during that window stopped picking up jobs, so it waits for Forgejo first.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until wget -q -O /dev/null https://git.{{ lab_domain }}/api/healthz; do sleep 2; done;
+        exec forgejo-runner daemon --config /data/config.yml
     working_dir: /data
     volumes:
       - ./data:/data

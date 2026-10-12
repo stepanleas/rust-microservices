@@ -1,4 +1,6 @@
 {{- if .Values.gateway.enabled }}
+{{- $parent := .Values.gateway.parentRef }}
+{{- if not $parent }}
 # North-south entry: Envoy (Gateway API) -> api-gateway, which routes /shop/<service>/...
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -14,13 +16,18 @@ spec:
       hostname: {{ . }}
       {{- end }}
 ---
+{{- end }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: shop
 spec:
   parentRefs:
+    {{- if $parent }}
+    {{- toYaml (list $parent) | nindent 4 }}
+    {{- else }}
     - name: shop
+    {{- end }}
   {{- with .Values.gateway.hostname }}
   hostnames: [{{ . | quote }}]
   {{- end }}

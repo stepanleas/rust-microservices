@@ -19,8 +19,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Picks the crates touched by the push/PR. A change to `shared` (or to this workflow)
-  # re-checks every crate, since all of them build against the local `shared` directory.
+  # Picks the crates touched by the push/PR. A change to `shared` (or to the CI) re-checks every
+  # crate, since all of them build against the local `shared` directory. Plain git, so the same
+  # file runs on GitHub and on the lab's Forgejo (see scripts/ci/changed-crates.sh).
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -28,33 +29,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Detect changed paths
-        id: filter
-        uses: dorny/paths-filter@v3
         with:
-          filters: |
-            all:
-              - "shared/**"
-              - ".github/workflows/ci.yml"
-            catalog: "catalog/**"
-            customer: "customer/**"
-            order: "order/**"
-            restaurant: "restaurant/**"
-            payment: "payment/**"
-            api-gateway: "api-gateway/**"
+          fetch-depth: 0
 
       - name: Build crate list
         id: crates
         env:
-          ALL: ${{ steps.filter.outputs.all }}
-          CHANGED: ${{ steps.filter.outputs.changes }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if [ "$ALL" = "true" ]; then
-            crates='["shared","catalog","customer","order","restaurant","payment","api-gateway"]'
-          else
-            crates=$(echo "$CHANGED" | jq -c 'map(select(. != "all"))')
-          fi
+          crates=$(scripts/ci/changed-crates.sh "$BASE" "$GITHUB_SHA")
           echo "crates=$crates" >> "$GITHUB_OUTPUT"
           echo "Crates to check: $crates"
 

@@ -1,0 +1,26 @@
+# Homelab (Argo CD, deploy/argocd): images from the lab registry, routed through the shared HTTPS
+# Gateway as https://shop.lab.internal. The image tag of each service comes from images.yaml in
+# the lab-env repository, written by the release workflow.
+global:
+  image:
+    registry: registry.lab.internal
+    namespace: shop
+  environment: lab
+
+kafka:
+  storageSize: 5Gi
+
+postgres:
+  storageSize: 2Gi
+
+gateway:
+  hostname: shop.lab.internal
+  parentRef: {name: lab, namespace: envoy-gateway-system, sectionName: https}
+
+catalog: &small
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 3}
+customer: *small
+order: *small
+restaurant: *small
+payment: *small
+api-gateway: *small

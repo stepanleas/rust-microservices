@@ -23,7 +23,8 @@ node containers): both together don't fit in 31 GB.
 - **Vagrant** creates empty VMs (CPU, RAM, disk, IP) from `lab.yml`. That's all it does.
 - **Ansible** turns them, and this machine, into the lab. Its tasks are declarative and
   idempotent, so re-running only fixes drift, and a second run reports `changed=0`.
-- **Argo CD** (Phase 4) will manage everything inside Kubernetes once the cluster exists.
+- **Argo CD** manages everything inside Kubernetes once the cluster exists (see
+  [CI/CD and GitOps](#cicd-and-gitops)). Ansible only installs it and writes what can't be in git.
 
 | Area | Ansible's job |
 |---|---|
@@ -55,7 +56,10 @@ Then:
   `~/.kube/config` (the previous file is kept as `~/.kube/config.before-lab`).
 - https://git.lab.internal: Forgejo. The user is `lab-admin`; the password is in the vault:
   `infra/scripts/ansible.sh ansible-vault view inventory/group_vars/all/vault.yml`.
-- https://registry.lab.internal: Zot. Pulls are anonymous; pushes need user `ci`.
+- https://registry.lab.internal: Zot. Pulls are anonymous; pushes need user `forgejo-ci`.
+- https://argocd.lab.internal: Argo CD. The user is `admin`; the password is in
+  `kubectl --context lab -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`.
+- https://shop.lab.internal: the shop, through the api-gateway (`/shop/<service>/...`).
 - https://ntfy.lab.internal: ntfy.
 
 `make lab_verify` checks:
@@ -78,6 +82,48 @@ Then:
 | `make lab_k8s_reset` | rebuilds the cluster on the existing VMs (workloads are lost) |
 | `make lab_etcd_backup` / `lab_backup` | etcd snapshot + PKI (and a Forgejo dump) to `~/.lab/backups/<time>/` |
 | `make lab_halt` / `lab_destroy` | stop / delete the VMs (`~/.lab` is kept, so a rebuild reuses the CA) |
+| `make lab_bootstrap [REVISION=<branch>]` | Argo CD + the root Application (also part of `lab_provision`); `REVISION` makes the lab follow a branch instead of `main` |
+| `make seal NAME=… NS=… FROM=<file> [OUT=…]` | a SealedSecret from a `KEY=value` file, safe to commit; only the lab cluster can decrypt it |
+
+## CI/CD and GitOps
+
+The workflows in `.github/workflows` run unchanged on GitHub and on the lab's Forgejo (there is
+no `.forgejo/workflows`, so Forgejo uses them). Everything that differs comes from repository
+variables and secrets, which the `forgejo` role sets on the lab and which are unset on GitHub:
+
+| | GitHub | Lab (Forgejo) |
+|---|---|---|
+| `ci.yml` | fmt, clippy, tests of the changed crates | the same, in job containers on the ops VM |
+| `release.yml` on `<service>-v<semver>` | `artellas/rust-<service>` on Docker Hub, gha build cache | `registry.lab.internal/shop/rust-<service>`, registry build cache, then `deploy-lab` |
+| `infra.yml` on `infra/**`, `deploy/**` | ansible-lint, helm lint, kubeconform | the same |
+| Variables | none | `CI_PLATFORM=lab`, `REGISTRY_HOST`, `IMAGE_NAMESPACE=shop`, `LAB_ENV_REPO`, `BUILDKITD_CONFIG` |
+| Secrets | `DOCKER_USERNAME/PASSWORD` (Docker Hub) | the Zot user, `LAB_DEPLOY_TOKEN` |
+
+Flow on the lab: `git push lab order-v1.4.0` → release builds and pushes the image to Zot →
+`deploy-lab` writes the tag to `images.yaml` in the repository `shop/lab-env` → Argo CD (polling
+every 60 s) syncs `rust-microservices` → rolling update. The bot user `lab-deploy` can write only
+to `lab-env`, so nothing ever commits to `main`, and `main` stays identical on GitHub and the lab.
+The image tags live in a repository of their own because an Argo CD application can't combine
+two revisions of the same repository.
+
+```
+deploy/argocd/                  chart rendered by the root Application (roles/argocd)
+├── charts.yaml -> ../platform/charts.yaml
+└── templates/
+    ├── platform.yaml           one Application per platform chart (sync waves: storage,
+    │                           operators, Argo CD itself), values from deploy/platform/<name>/
+    ├── lab-config.yaml         deploy/platform/*/lab/*.yaml, e.g. the HTTPS Gateway on .200
+    └── rust-microservices.yaml chart + values-lab.yaml + images.yaml from lab-env
+```
+
+`deploy/platform/charts.yaml` pins every platform chart for both kind (`kind-up.sh`) and the
+lab. Ansible writes only what can't be in git: the wildcard certificate secret for the Gateway
+and the lab CA for Argo CD (both from `~/.lab/ca`), and the root Application.
+
+Git: `git push lab <branch>` / `git push lab <tag>`; `git push lab --all` re-pushes every branch
+after the lab was down. Git reads the lab token from `~/.lab/forgejo-token` (credential helper in
+`.git/config`). `infra/scripts/lab-remote.sh` also adds the lab as a second push URL of `origin`,
+so a plain `git push` goes to both.
 
 ## Layout
 
@@ -85,18 +131,19 @@ Then:
 infra/
 ├── lab.yml               topology: names, IPs, sizes, network, box (Vagrantfile + inventory)
 ├── Vagrantfile
-├── scripts/              ansible.sh / vagrant.sh wrappers, lab-tools, lab-secrets, lab-verify
+├── scripts/              ansible.sh / vagrant.sh wrappers, lab-tools, lab-secrets, lab-verify,
+│                         lab-remote
 └── ansible/
     ├── ansible.cfg, .ansible-lint, requirements.yml
     ├── inventory/lab.py               groups ops_vm, control_plane, workers, kubernetes from lab.yml
     ├── inventory/group_vars/all/      main.yml (versions, settings), vault.yml (encrypted)
-    ├── site.yml                       common → ops → kubernetes
-    ├── playbooks/                     host, common, ops, kubernetes, upgrade-kubernetes,
+    ├── site.yml                       common → ops → kubernetes → argocd
+    ├── playbooks/                     host, common, ops, kubernetes, argocd, upgrade-kubernetes,
     │                                  renew-certs, reset, backup
     └── roles/                         one per concern (lab_ca, common, dnsmasq, docker, caddy, zot,
                                        forgejo, forgejo_runner, ntfy, node_exporter, containerd,
                                        kube_packages, kubeadm_control_plane, kubeadm_worker,
-                                       cilium, lab_kubeconfig, lab_host, lab_host_user)
+                                       cilium, lab_kubeconfig, argocd, lab_host, lab_host_user)
 ```
 
 Names: every `*.lab.internal` resolves to the ingress IP `.200`, except the ones served by
@@ -117,6 +164,10 @@ by `lab_provision` 30 days before it expires.
   rate-limited.
 - **A node is NotReady after a host reboot:** `make lab_up` starts the VMs again (provisioning
   is idempotent). Kubernetes recovers by itself within a minute or two.
+- **CI runs stay `waiting` on the lab:** the runner can stop taking jobs after it was restarted
+  while jobs were running. `make lab_ssh VM=ops` then `sudo docker restart forgejo-runner`.
+- **On the lab, the first push of a branch tests every crate:** without a previous commit,
+  `scripts/ci/changed-crates.sh` compares against `origin/main`.
 - **Start over:** `make lab_destroy lab_up`. The CA and secrets in `~/.lab` stay, so browsers
   keep trusting the lab.
 

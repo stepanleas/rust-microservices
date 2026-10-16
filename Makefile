@@ -91,11 +91,13 @@ e2e_scaled:
 kind_tool:
 	./deploy/scripts/kind-tool.sh
 
-# Cluster (1 control plane + 2 workers) + platform operators (metrics-server, CNPG, Strimzi, Envoy Gateway).
+# Cluster (1 control plane + 2 workers) + platform charts (operators, observability stack: Grafana
+# at http://localhost:8088/grafana once the shop is deployed).
 kind_up:
 	./deploy/scripts/kind-up.sh
 
-# Builds the 6 images (tag local) and loads them into kind; SKIP_BUILD=1 only loads.
+# Builds the 6 images (tag local) and loads them into kind, restarting the deployed ones;
+# SERVICES="order api-gateway" only those, SKIP_BUILD=1 only loads.
 kind_images:
 	./deploy/scripts/kind-load.sh
 

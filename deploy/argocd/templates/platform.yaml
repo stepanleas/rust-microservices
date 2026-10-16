@@ -14,7 +14,17 @@ spec:
     server: https://kubernetes.default.svc
     namespace: {{ $chart.namespace }}
   sources:
-    {{- if hasPrefix "oci://" $chart.repo }}
+    {{- if $chart.local }}
+    # Chart in this repository: deploy/platform/<name> is the chart, next to its values.
+    - repoURL: {{ $.Values.repoURL }}
+      targetRevision: {{ $.Values.revision }}
+      path: deploy/platform/{{ $chart.name }}
+      helm:
+        releaseName: {{ $chart.name }}
+        valueFiles: [values.yaml, values-lab.yaml]
+        ignoreMissingValueFiles: true
+    {{- else }}
+    {{- if hasPrefix "oci://" (default "" $chart.repo) }}
     # Helm chart in an OCI registry: repository = everything up to the chart name.
     - repoURL: {{ trimPrefix "oci://" $chart.repo | dir }}
       chart: {{ base $chart.repo }}
@@ -35,6 +45,7 @@ spec:
     - repoURL: {{ $.Values.repoURL }}
       targetRevision: {{ $.Values.revision }}
       ref: values
+    {{- end }}
   {{- with $chart.ignoreDifferences }}
   ignoreDifferences:
     {{- toYaml . | nindent 4 }}
@@ -44,7 +55,7 @@ spec:
 {{- end }}
 {{- end }}
 {{- range $chart := .Files.Get "charts.yaml" | fromYamlArray }}
-{{- if and (hasPrefix "oci://" $chart.repo) (ne (toString (dig "lab" true $chart)) "false") }}
+{{- if and (hasPrefix "oci://" (default "" $chart.repo)) (ne (toString (dig "lab" true $chart)) "false") }}
 ---
 # Argo CD only pulls Helm charts from an OCI registry that is declared as such.
 apiVersion: v1

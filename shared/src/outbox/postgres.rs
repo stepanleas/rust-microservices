@@ -2,7 +2,7 @@
 //! `outbox_messages` table (see the services' `create_outbox_messages_table` migration).
 
 use super::ports::{ClaimedBatch, OutboxBatchTransaction, OutboxRepository};
-use super::{MessageKind, OutboxMessage, OutboxStatus};
+use super::{MessageKind, OutboxBacklog, OutboxMessage, OutboxStatus};
 use crate::db::DbPool;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use diesel::connection::{AnsiTransactionManager, TransactionManager};
@@ -23,6 +23,8 @@ diesel::table! {
         attempts -> Int4,
         created_at -> Timestamp,
         processed_at -> Nullable<Timestamp>,
+        #[max_length = 128]
+        trace_context -> Nullable<Varchar>,
     }
 }
 
@@ -38,6 +40,7 @@ struct OutboxMessageRow {
     attempts: i32,
     created_at: NaiveDateTime,
     processed_at: Option<NaiveDateTime>,
+    trace_context: Option<String>,
 }
 
 impl<K: MessageKind> From<&OutboxMessage<K>> for OutboxMessageRow {
@@ -51,6 +54,7 @@ impl<K: MessageKind> From<&OutboxMessage<K>> for OutboxMessageRow {
             attempts: message.attempts(),
             created_at: message.created_at().naive_utc(),
             processed_at: None,
+            trace_context: message.trace_context().map(str::to_string),
         }
     }
 }
@@ -65,7 +69,8 @@ impl OutboxMessageRow {
             OutboxStatus::try_from(self.outbox_status.as_str())?,
             self.attempts,
             self.created_at.and_utc(),
-        ))
+        )
+        .with_trace_context(self.trace_context))
     }
 }
 
@@ -198,6 +203,30 @@ impl<K: MessageKind> OutboxRepository<K> for PostgresOutboxRepository<K> {
             diesel::delete(outbox_messages::table.filter(outbox_messages::id.eq_any(ids)))
                 .execute(&mut connection)?,
         )
+    }
+
+    fn backlog(&self) -> anyhow::Result<OutboxBacklog> {
+        let mut connection = self.pool.get()?;
+
+        // Both use the (outbox_status, created_at) index; COMPLETED rows (the bulk) are skipped.
+        let count = |connection: &mut PgConnection, status: OutboxStatus| {
+            outbox_messages::table
+                .filter(outbox_messages::outbox_status.eq(status.as_str()))
+                .count()
+                .get_result::<i64>(connection)
+        };
+        let started = count(&mut connection, OutboxStatus::Started)?;
+        let failed = count(&mut connection, OutboxStatus::Failed)?;
+        let oldest_started = outbox_messages::table
+            .filter(outbox_messages::outbox_status.eq(OutboxStatus::Started.as_str()))
+            .select(diesel::dsl::min(outbox_messages::created_at))
+            .first::<Option<NaiveDateTime>>(&mut connection)?;
+
+        Ok(OutboxBacklog {
+            started,
+            failed,
+            oldest_started: oldest_started.map(|at| at.and_utc()),
+        })
     }
 }
 

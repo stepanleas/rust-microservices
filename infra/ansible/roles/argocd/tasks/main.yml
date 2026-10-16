@@ -6,7 +6,7 @@
     kubeconfig: "{{ lab_kubeconfig }}"
     kind: Namespace
     name: "{{ item }}"
-  loop: ["{{ argocd_namespace }}", envoy-gateway-system]
+  loop: ["{{ argocd_namespace }}", envoy-gateway-system, monitoring]
 
 # The lab CA and wildcard certificate are generated per lab (roles/lab_ca), so they are copied in
 # from ~/.lab/ca, here and again after every renewal.
@@ -39,6 +39,18 @@
           app.kubernetes.io/part-of: argocd
       # Keys are hostnames; Ansible doesn't template mapping keys, hence the expression.
       data: "{{ {'git.' ~ lab_domain: lookup('file', lab_ca_dir ~ '/ca.crt') ~ '\n'} }}"
+
+- name: Prometheus and Alertmanager trust the lab CA (ops VM targets, ntfy)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: lab-ca
+        namespace: monitoring
+      data:
+        ca.crt: "{{ lookup('file', lab_ca_dir ~ '/ca.crt') ~ '\n' }}"
 
 # Installed only once: afterwards the argo-cd Application (deploy/argocd) manages this release.
 - name: Argo CD release

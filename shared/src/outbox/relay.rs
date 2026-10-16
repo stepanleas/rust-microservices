@@ -1,11 +1,15 @@
 use super::MessageKind;
 use super::ports::{ClaimedBatch, OutboxMessagePublisher, OutboxRepository};
 use crate::shutdown::Shutdown;
+use crate::trace_context;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tracing::field::Empty;
 
 /// How often the relay deletes old `COMPLETED` messages.
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(300);
+/// How often the relay publishes the backlog metrics.
+const BACKLOG_INTERVAL: Duration = Duration::from_secs(15);
 /// Rows deleted per statement during cleanup.
 const CLEANUP_BATCH: i64 = 5_000;
 
@@ -23,6 +27,13 @@ pub struct RelaySettings {
 /// A message is marked `COMPLETED` only after the broker acknowledged it, so delivery is
 /// at-least-once: consumers must be idempotent. Every replica of a service runs a relay: each
 /// batch is claimed with `FOR UPDATE SKIP LOCKED`, so two relays never send the same message.
+///
+/// A message is published in the trace that created it. Metrics:
+///
+/// - `outbox_publish_total{type, result="ok"|"error"}`
+/// - `outbox_publish_duration_seconds{type}` (histogram)
+/// - `outbox_messages{status="STARTED"|"FAILED"}` and `outbox_oldest_started_age_seconds`
+///   (gauges of the whole table, refreshed every 15 s: every replica reports the same value)
 pub struct OutboxRelay<K: MessageKind> {
     repository: Arc<dyn OutboxRepository<K>>,
     publisher: Arc<dyn OutboxMessagePublisher<K>>,
@@ -60,15 +71,31 @@ impl<K: MessageKind> OutboxRelay<K> {
             if shutdown.is_triggered() {
                 break;
             }
-            let _span = tracing::info_span!(
+            let message_type = message.message_type().as_str();
+            let span = tracing::info_span!(
                 "outbox_publish",
                 message_id = %message.id(),
                 saga_id = %message.saga_id(),
-                message_type = message.message_type().as_str(),
-            )
-            .entered();
+                message_type,
+                trace_id = Empty,
+                otel.name = format!("{message_type} publish"),
+                otel.kind = "producer",
+            );
+            trace_context::continue_trace(&span, message.trace_context());
+            let _span = span.entered();
 
-            match self.publisher.publish(&message) {
+            let started = Instant::now();
+            let result = self.publisher.publish(&message);
+            metrics::histogram!("outbox_publish_duration_seconds", "type" => message_type)
+                .record(started.elapsed().as_secs_f64());
+            metrics::counter!(
+                "outbox_publish_total",
+                "type" => message_type,
+                "result" => if result.is_ok() { "ok" } else { "error" },
+            )
+            .increment(1);
+
+            match result {
                 Ok(()) => {
                     transaction.mark_completed(message.id())?;
                     published += 1;
@@ -107,6 +134,20 @@ impl<K: MessageKind> OutboxRelay<K> {
         }
     }
 
+    /// Publishes the backlog gauges (see the type's documentation).
+    fn publish_backlog(&self) -> anyhow::Result<()> {
+        let backlog = self.repository.backlog()?;
+        let oldest_age = backlog
+            .oldest_started
+            .map(|at| (chrono::Utc::now() - at).as_seconds_f64().max(0.0))
+            .unwrap_or(0.0);
+
+        metrics::gauge!("outbox_messages", "status" => "STARTED").set(backlog.started as f64);
+        metrics::gauge!("outbox_messages", "status" => "FAILED").set(backlog.failed as f64);
+        metrics::gauge!("outbox_oldest_started_age_seconds").set(oldest_age);
+        Ok(())
+    }
+
     /// Runs the relay on a dedicated thread until `shutdown` is triggered; it then finishes
     /// the message being published, commits and exits.
     pub fn spawn(self, shutdown: &Shutdown) -> std::thread::JoinHandle<()> {
@@ -118,6 +159,7 @@ impl<K: MessageKind> OutboxRelay<K> {
                 self.settings.poll_interval
             );
             let mut last_cleanup: Option<Instant> = None;
+            let mut last_backlog: Option<Instant> = None;
 
             loop {
                 if let Err(error) = self.process_batch_until(&shutdown) {
@@ -130,6 +172,13 @@ impl<K: MessageKind> OutboxRelay<K> {
                         Ok(0) => {}
                         Ok(deleted) => tracing::info!("Deleted {deleted} old outbox messages"),
                         Err(error) => tracing::error!("Outbox cleanup failed: {}", error),
+                    }
+                }
+
+                if last_backlog.is_none_or(|at| at.elapsed() >= BACKLOG_INTERVAL) {
+                    last_backlog = Some(Instant::now());
+                    if let Err(error) = self.publish_backlog() {
+                        tracing::warn!("Failed to read the outbox backlog: {}", error);
                     }
                 }
 

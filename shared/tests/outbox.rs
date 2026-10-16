@@ -25,7 +25,8 @@ CREATE TABLE outbox_messages (
     outbox_status VARCHAR(16) NOT NULL CHECK (outbox_status IN ('STARTED', 'COMPLETED', 'FAILED')),
     attempts INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP
+    processed_at TIMESTAMP,
+    trace_context VARCHAR(128)
 );
 CREATE INDEX idx_outbox_messages_status_created_at ON outbox_messages (outbox_status, created_at);
 ";
@@ -197,4 +198,36 @@ async fn test_cleanup_deletes_only_old_completed_messages() -> anyhow::Result<()
         Ok(())
     })
     .await?
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_backlog_counts_pending_messages_and_keeps_the_trace_context() -> anyhow::Result<()> {
+    let (_postgres, pool) = start_postgres().await?;
+
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let repository = PostgresOutboxRepository::<Kind>::new(&pool);
+        assert_eq!(0, repository.backlog()?.started);
+
+        let traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+        let message = OutboxMessage::new(Uuid::new_v4(), Kind, &"traced")?
+            .with_trace_context(Some(traceparent.to_string()));
+        insert_outbox_message(&mut *pool.get()?, &message)?;
+        let failed = insert_messages(&pool, 2)?;
+        for id in &failed {
+            repository.mark_attempt_failed(*id, 1)?;
+        }
+
+        let backlog = repository.backlog()?;
+        assert_eq!(1, backlog.started);
+        assert_eq!(2, backlog.failed);
+        let oldest = backlog.oldest_started.expect("a STARTED message exists");
+        assert!((Utc::now() - oldest).num_seconds() < 60);
+
+        let claimed = repository.claim_batch(10)?;
+        assert_eq!(Some(traceparent), claimed.messages[0].trace_context());
+        Ok(())
+    })
+    .await??;
+
+    Ok(())
 }

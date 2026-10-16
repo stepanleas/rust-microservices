@@ -1,0 +1,125 @@
+# Grafana Alloy on every node (DaemonSet), the single telemetry agent:
+# - the logs of the node's pods (/var/log/pods) -> Loki, the services' JSON level as a label;
+# - OTLP traces from the services (OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.monitoring:4318)
+#   -> Tempo. The Service keeps spans on the sender's node (internalTrafficPolicy: Local).
+alloy:
+  enableReporting: false
+  mounts:
+    varlog: true
+  extraEnv:
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef: {fieldPath: spec.nodeName}
+  extraPorts:
+    - {name: otlp-grpc, port: 4317, targetPort: 4317, protocol: TCP}
+    - {name: otlp-http, port: 4318, targetPort: 4318, protocol: TCP}
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+  configMap:
+    content: |
+      // Pods of this node only: every node has its own Alloy.
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("NODE_NAME")
+        }
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+        // /var/log/pods/<namespace>_<pod>_<uid>/<container>/<n>.log
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
+      }
+
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      loki.process "pod_logs" {
+        stage.cri {}
+
+        // The services log JSON lines (LOG_FORMAT=json): level as a label (few values). The
+        // trace_id stays in the line; Grafana's Loki datasource links it to Tempo.
+        stage.match {
+          selector = "{namespace=\"shop\"}"
+          stage.json {
+            expressions = {level = "level"}
+          }
+          stage.labels {
+            values = {level = ""}
+          }
+        }
+
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring:3100/loki/api/v1/push"
+        }
+      }
+
+      otelcol.receiver.otlp "default" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+        output {
+          traces = [otelcol.processor.batch.default.input]
+        }
+      }
+
+      otelcol.processor.batch "default" {
+        output {
+          traces = [otelcol.exporter.otlp.tempo.input]
+        }
+      }
+
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "tempo.monitoring:4317"
+          tls {
+            insecure = true
+          }
+        }
+      }
+
+service:
+  internalTrafficPolicy: Local
+
+serviceMonitor:
+  enabled: true

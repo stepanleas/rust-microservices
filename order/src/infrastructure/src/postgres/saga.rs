@@ -28,7 +28,7 @@ impl From<&OrderSaga> for OrderSagaRow {
             id: saga.id(),
             order_id: saga.order_id().into(),
             status: saga.status().as_str().to_string(),
-            created_at: chrono::Utc::now().naive_utc(),
+            created_at: saga.started_at().naive_utc(),
             updated_at: chrono::Utc::now().naive_utc(),
         }
     }
@@ -42,6 +42,7 @@ impl TryFrom<OrderSagaRow> for OrderSaga {
             row.id,
             OrderId::from_uuid(row.order_id),
             SagaStatus::try_from(row.status.as_str())?,
+            row.created_at.and_utc(),
         ))
     }
 }

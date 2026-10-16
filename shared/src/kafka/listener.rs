@@ -1,10 +1,15 @@
 use super::{KafkaConsumer, KafkaProducer, dead_letter_topic};
 use crate::shutdown::Shutdown;
+use crate::trace_context::{self, TRACEPARENT};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tracing::field::Empty;
 
 /// How long one poll waits for a message before polling again.
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
+/// How often the partition assignment of the consumer is published as a metric.
+const ASSIGNMENT_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Handles the messages of the topics a service consumes (the driving adapter's entry point).
 pub trait MessageHandler: Send + Sync {
@@ -52,6 +57,14 @@ impl RetryPolicy {
 ///
 /// On shutdown the listener finishes the message in hand (a message still being retried is
 /// left for redelivery, not dead-lettered), commits the stored offsets and returns.
+///
+/// Each message is handled in a span that continues the producer's trace (`traceparent`
+/// header). Metrics:
+///
+/// - `kafka_messages_handled_total{topic, result="ok"|"retry"|"dlq"}`: `retry` counts failed
+///   attempts that were retried
+/// - `kafka_handler_duration_seconds{topic}`: from the first attempt to the outcome (histogram)
+/// - `kafka_consumer_assigned_partitions{topic}`: partitions this replica owns (gauge)
 pub fn listen(
     hosts: Vec<String>,
     group_id: String,
@@ -68,8 +81,14 @@ pub fn listen(
     let mut dead_letters = KafkaProducer::new(hosts);
 
     tracing::info!("Kafka listener started for topics {:?}", topics);
+    let mut assignment_published: Option<Instant> = None;
 
     while !shutdown.is_triggered() {
+        if assignment_published.is_none_or(|at| at.elapsed() >= ASSIGNMENT_INTERVAL) {
+            assignment_published = Some(Instant::now());
+            publish_assignment(&consumer, &topics);
+        }
+
         let message = match consumer.poll(POLL_TIMEOUT) {
             Ok(Some(message)) => message,
             Ok(None) => continue,
@@ -82,15 +101,23 @@ pub fn listen(
             }
         };
 
-        let _span = tracing::info_span!(
+        let span = tracing::info_span!(
             "kafka_message",
             topic = %message.topic,
             partition = message.partition,
             offset = message.offset,
             key = %String::from_utf8_lossy(&message.key),
-        )
-        .entered();
+            trace_id = Empty,
+            otel.name = format!("{} process", message.topic),
+            otel.kind = "consumer",
+        );
+        let traceparent = message
+            .header(TRACEPARENT)
+            .and_then(|value| std::str::from_utf8(value).ok());
+        trace_context::continue_trace(&span, traceparent);
+        let _span = span.entered();
 
+        let started = Instant::now();
         let outcome = handle_with_retry(
             handler.as_ref(),
             &message.topic,
@@ -98,6 +125,19 @@ pub fn listen(
             &retry,
             |backoff| shutdown.sleep(backoff),
         );
+        let result = match outcome {
+            Outcome::Handled => Some("ok"),
+            Outcome::GaveUp(_) => Some("dlq"),
+            Outcome::Interrupted => None,
+        };
+        if let Some(result) = result {
+            let topic = message.topic.clone();
+            metrics::counter!("kafka_messages_handled_total", "topic" => topic.clone(), "result" => result)
+                .increment(1);
+            metrics::histogram!("kafka_handler_duration_seconds", "topic" => topic)
+                .record(started.elapsed().as_secs_f64());
+        }
+
         match outcome {
             Outcome::Handled => {}
             Outcome::Interrupted => {
@@ -135,6 +175,28 @@ pub fn listen(
     }
 }
 
+/// Sets `kafka_consumer_assigned_partitions` for every subscribed topic (0 when none of its
+/// partitions is assigned here), so the dashboards show how the group spread the partitions.
+fn publish_assignment(consumer: &KafkaConsumer, topics: &[&'static str]) {
+    let assignment = match consumer.assignment() {
+        Ok(assignment) => assignment,
+        Err(error) => {
+            tracing::debug!("Failed to read the partition assignment: {error}");
+            return;
+        }
+    };
+
+    let mut partitions: HashMap<&str, usize> = topics.iter().map(|topic| (*topic, 0)).collect();
+    for (topic, _) in &assignment {
+        if let Some(count) = partitions.get_mut(topic.as_str()) {
+            *count += 1;
+        }
+    }
+    for (topic, count) in partitions {
+        metrics::gauge!("kafka_consumer_assigned_partitions", "topic" => topic).set(count as f64);
+    }
+}
+
 #[derive(Debug)]
 enum Outcome {
     Handled,
@@ -159,6 +221,12 @@ fn handle_with_retry(
             Ok(()) => return Outcome::Handled,
             Err(error) if attempt >= retry.max_attempts.max(1) => return Outcome::GaveUp(error),
             Err(error) => {
+                metrics::counter!(
+                    "kafka_messages_handled_total",
+                    "topic" => topic.to_string(),
+                    "result" => "retry",
+                )
+                .increment(1);
                 let backoff = retry.backoff(attempt);
                 tracing::warn!(
                     "Failed to handle message of {} (attempt {} of {}): {}. Retrying in {:?}",

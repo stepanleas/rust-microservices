@@ -32,6 +32,9 @@ configs:
     create: false
 
 server:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}
   httproute:
     enabled: true
     hostnames: [argocd.lab.internal]
@@ -49,3 +52,14 @@ notifications:
 # manages itself it would wait for that hook forever; the secret already exists by then.
 redisSecretInit:
   enabled: false
+
+# Metrics for Prometheus (also server.metrics above): application sync/health (argocd_app_info)
+# and git activity. The ServiceMonitors are only rendered once kube-prometheus-stack's CRD exists.
+controller:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}
+repoServer:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}

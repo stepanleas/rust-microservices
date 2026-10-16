@@ -1,0 +1,48 @@
+// Managed by Ansible (alloy role).
+loki.write "lab" {
+  endpoint {
+    url = "https://loki.{{ lab_domain }}/loki/api/v1/push"
+  }
+  external_labels = {host = "ops"}
+}
+
+// systemd journal: unit as a label.
+loki.relabel "journal" {
+  forward_to = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "system" {
+  max_age       = "12h"
+  relabel_rules = loki.relabel.journal.rules
+  labels        = {job = "ops/journal"}
+  forward_to    = [loki.write.lab.receiver]
+}
+
+// Containers of the ops services: container name as a label.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = {job = "ops/containers"}
+  forward_to = [loki.write.lab.receiver]
+}

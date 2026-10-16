@@ -83,3 +83,11 @@ fn store_step(
 
     Ok(advanced)
 }
+
+/// Counts a finished saga (`saga_completed_total{outcome}`) and how long it ran since the order
+/// was placed (`saga_duration_seconds{outcome}`). Outcomes: `paid`, `rejected`, `payment_failed`.
+fn record_saga_end(saga: &OrderSaga, outcome: &'static str) {
+    let duration = (chrono::Utc::now() - saga.started_at()).as_seconds_f64();
+    metrics::counter!("saga_completed_total", "outcome" => outcome).increment(1);
+    metrics::histogram!("saga_duration_seconds", "outcome" => outcome).record(duration.max(0.0));
+}

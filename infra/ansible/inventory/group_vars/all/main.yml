@@ -25,6 +25,7 @@ forgejo_runner_image: data.forgejo.org/forgejo/runner:13.2.0
 forgejo_runner_job_image: ghcr.io/catthehacker/ubuntu:act-24.04
 ntfy_image: binwiederhier/ntfy:v2.29.0
 node_exporter_image: prom/node-exporter:v1.12.1
+alloy_image: grafana/alloy:v1.20.1
 
 # Names served by the ops VM; every other *.lab.internal name points at the ingress IP.
 ops_hostnames: [ops, git, registry, mirror, ntfy]

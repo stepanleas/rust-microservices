@@ -2,7 +2,7 @@ use crate::outbox::{OrderOutboxMessage, OrderPaymentEventPayload, OutboxMessageT
 use crate::ports::out::repositories::OrderRepository;
 use crate::ports::out::saga_store::OrderSagaRepository;
 use crate::saga::dtos::RestaurantApprovalResponse;
-use crate::saga::{load_pending_step, store_step};
+use crate::saga::{load_pending_step, record_saga_end, store_step};
 use domain::saga::SagaStatus;
 use shared::error::AppResult;
 use std::sync::Arc;
@@ -85,6 +85,7 @@ impl RestaurantApprovalSaga {
             SagaStatus::Started,
             None,
         )? {
+            record_saga_end(&saga, "rejected");
             tracing::info!(
                 "Order {} rejected by the restaurant: {:?}",
                 response.order_id,

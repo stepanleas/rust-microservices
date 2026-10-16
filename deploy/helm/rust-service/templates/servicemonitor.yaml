@@ -1,0 +1,18 @@
+{{- if and .Values.metrics.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
+# Prometheus scrapes GET /metrics of every pod (shared::observability). The `service` label of
+# the series is the Service name, e.g. `order`.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "rust-service.name" . }}
+  labels:
+    {{- include "rust-service.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "rust-service.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: {{ .Values.metrics.path }}
+      interval: {{ .Values.metrics.interval }}
+{{- end }}

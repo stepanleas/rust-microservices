@@ -1,6 +1,7 @@
 pub mod circuit_breaker;
 pub mod config;
 pub mod correlation_id;
+pub mod http_metrics;
 pub mod proxy;
 
 use std::{net::SocketAddr, sync::Arc};
@@ -25,10 +26,16 @@ pub fn app(settings: &Settings) -> anyhow::Result<Router> {
 
     let health = Router::new()
         .route("/api/health/live", get(health_ok))
-        .route("/api/health/ready", get(health_ok));
+        .route("/api/health/ready", get(health_ok))
+        .route(
+            http_metrics::METRICS_PATH,
+            get(http_metrics::metrics_endpoint),
+        );
 
+    // `route_layer`: runs after routing, so the matched route template is known.
     Ok(shop
         .merge(health)
+        .route_layer(middleware::from_fn(http_metrics::record))
         .layer(middleware::from_fn(correlation_id::correlation_id))
         .layer(TraceLayer::new_for_http()))
 }

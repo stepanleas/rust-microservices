@@ -4,7 +4,7 @@ use starter::run;
 #[actix_web::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    shared::logging::init();
+    let _telemetry = shared::observability::init("customer");
     run().await?.await?;
 
     Ok(())

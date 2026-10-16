@@ -15,22 +15,25 @@ fi
 kubectl config use-context "kind-$CLUSTER_NAME" >/dev/null
 
 while read -r name repo chart chart_version namespace; do
-  step "Installing $name $chart_version"
+  step "Installing $name ${chart_version/#-/(local chart)}"
   values=(-f "$DEPLOY_DIR/platform/$name/values.yaml")
   [[ -f "$DEPLOY_DIR/platform/$name/values-kind.yaml" ]] && values+=(-f "$DEPLOY_DIR/platform/$name/values-kind.yaml")
-  if [[ "$repo" == oci://* ]]; then
-    source=("$repo")
+  if [[ "$repo" == local ]]; then
+    source=("$DEPLOY_DIR/platform/$name")
+  elif [[ "$repo" == oci://* ]]; then
+    source=("$repo" --version "$chart_version")
   else
-    source=("$chart" --repo "$repo")
+    source=("$chart" --repo "$repo" --version "$chart_version")
   fi
-  helm upgrade --install "$name" "${source[@]}" --version "$chart_version" \
+  helm upgrade --install "$name" "${source[@]}" \
     --namespace "$namespace" --create-namespace "${values[@]}" --wait --timeout 5m \
     | grep -E '^(STATUS|REVISION):'
 done < <(python3 - "$CHARTS" <<'PY'
 import sys, yaml
 for c in yaml.safe_load(open(sys.argv[1])):
     if c.get("kind", True):
-        print(c["name"], c["repo"], c.get("chart", "-"), c["version"], c["namespace"])
+        repo = "local" if c.get("local") else c["repo"]
+        print(c["name"], repo, c.get("chart", "-"), c.get("version", "-"), c["namespace"])
 PY
 )
 

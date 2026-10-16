@@ -12,6 +12,7 @@ uuid.workspace = true
 anyhow.workspace = true
 rust_decimal.workspace = true
 tracing.workspace = true
+metrics.workspace = true
 mockall = { workspace = true, optional = true }
 chrono.workspace = true
 shared = { workspace = true, features = ["outbox"] }

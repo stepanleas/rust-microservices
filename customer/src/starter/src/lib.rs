@@ -5,12 +5,11 @@ use crate::config::Settings;
 use actix_web::dev::Server;
 use actix_web::middleware::Logger;
 use actix_web::web::Data;
-use actix_web::{App, HttpServer};
+use actix_web::{App, HttpServer, web};
 use anyhow::Result;
 use shared::db::DbHealthCheck;
-use shared::web::CorrelationIdMiddleware;
 use shared::web::health::HealthChecks;
-use tracing_actix_web::TracingLogger;
+use shared::web::{CorrelationIdMiddleware, HttpMetrics, METRICS_PATH, metrics_endpoint};
 use utoipa_actix_web::AppExt;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -28,7 +27,7 @@ async fn run_internal(settings: &Settings) -> Result<Server> {
 
     let server = HttpServer::new(move || {
         App::new()
-            .wrap(TracingLogger::default())
+            .wrap(HttpMetrics)
             .wrap(CorrelationIdMiddleware)
             .into_utoipa_app()
             .openapi(presentation::api::docs::open_api_docs())
@@ -40,6 +39,7 @@ async fn run_internal(settings: &Settings) -> Result<Server> {
             .app_data(Data::new(app_state.clone()))
             .app_data(Data::new(health_checks.clone()))
             .into_app()
+            .route(METRICS_PATH, web::get().to(metrics_endpoint))
     })
     .bind(&settings.http_url)?
     .run();

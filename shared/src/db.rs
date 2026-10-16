@@ -1,7 +1,9 @@
 use diesel::PgConnection;
 use diesel::RunQueryDsl;
-use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::r2d2::event::{AcquireEvent, CheckinEvent, CheckoutEvent, ReleaseEvent, TimeoutEvent};
+use diesel::r2d2::{ConnectionManager, HandleEvent, Pool};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
@@ -42,6 +44,7 @@ pub fn connect_retrying(
         let built = Pool::builder()
             .max_size(settings.max_connections)
             .connection_timeout(settings.connection_timeout)
+            .event_handler(Box::new(PoolMetrics::default()))
             .build(manager);
 
         match built {
@@ -58,6 +61,54 @@ pub fn connect_retrying(
     run_migrations(&mut *pool.get()?, migrations)?;
 
     Ok(pool)
+}
+
+/// Publishes the pool's state as metrics:
+///
+/// - `db_pool_connections{state="idle"|"in_use"}` (gauges)
+/// - `db_pool_wait_seconds`: how long getting a connection took (histogram)
+/// - `db_pool_timeouts_total`: requests that got no connection within the connection timeout
+#[derive(Debug, Default)]
+struct PoolMetrics {
+    open: AtomicI64,
+    in_use: AtomicI64,
+}
+
+impl PoolMetrics {
+    fn publish(&self) {
+        let open = self.open.load(Ordering::Relaxed);
+        let in_use = self.in_use.load(Ordering::Relaxed);
+        metrics::gauge!("db_pool_connections", "state" => "in_use").set(in_use as f64);
+        metrics::gauge!("db_pool_connections", "state" => "idle").set((open - in_use) as f64);
+    }
+}
+
+impl HandleEvent for PoolMetrics {
+    fn handle_acquire(&self, _: AcquireEvent) {
+        self.open.fetch_add(1, Ordering::Relaxed);
+        self.publish();
+    }
+
+    fn handle_release(&self, _: ReleaseEvent) {
+        self.open.fetch_sub(1, Ordering::Relaxed);
+        self.publish();
+    }
+
+    fn handle_checkout(&self, event: CheckoutEvent) {
+        self.in_use.fetch_add(1, Ordering::Relaxed);
+        metrics::histogram!("db_pool_wait_seconds").record(event.duration().as_secs_f64());
+        self.publish();
+    }
+
+    fn handle_timeout(&self, event: TimeoutEvent) {
+        metrics::counter!("db_pool_timeouts_total").increment(1);
+        metrics::histogram!("db_pool_wait_seconds").record(event.timeout().as_secs_f64());
+    }
+
+    fn handle_checkin(&self, _: CheckinEvent) {
+        self.in_use.fetch_sub(1, Ordering::Relaxed);
+        self.publish();
+    }
 }
 
 /// Key of the advisory lock that serializes migrations (any constant works, one per database).

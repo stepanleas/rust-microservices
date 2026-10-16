@@ -1,0 +1,5 @@
+# HELP lab_certificate_expiry_timestamp_seconds When a certificate of the lab CA expires (Unix time).
+# TYPE lab_certificate_expiry_timestamp_seconds gauge
+{% for result in lab_certificates.results %}
+lab_certificate_expiry_timestamp_seconds{certificate="{{ result.item }}"} {{ result.stdout }}
+{% endfor %}

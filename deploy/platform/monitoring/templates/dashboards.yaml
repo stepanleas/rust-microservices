@@ -1,0 +1,19 @@
+{{- /* dashboards/<folder>/<name>.json -> one ConfigMap each, loaded by Grafana's sidecar into
+       the Grafana folder of the same name. */}}
+{{- range $path, $_ := .Files.Glob "dashboards/*/*.json" }}
+{{- $folder := base (dir $path) }}
+{{- if or (ne $folder "infrastructure") $.Values.lab.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-{{ base $path | trimSuffix ".json" }}
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: {{ $folder | title }}
+data:
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}

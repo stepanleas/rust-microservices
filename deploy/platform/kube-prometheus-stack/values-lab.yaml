@@ -1,0 +1,59 @@
+# Homelab: Grafana, Prometheus and Alertmanager behind the lab Gateway (HTTPS), alerts pushed to
+# ntfy on the ops VM. The `lab-ca` ConfigMap (the lab CA, to trust ntfy.lab.internal) is written
+# by the bootstrap playbook (infra/ansible/roles/argocd).
+x-lab-gateway: &lab-gateway
+  - {name: lab, namespace: envoy-gateway-system, sectionName: https}
+
+prometheus:
+  route:
+    main:
+      enabled: true
+      hostnames: [prometheus.lab.internal]
+      parentRefs: *lab-gateway
+
+alertmanager:
+  route:
+    main:
+      enabled: true
+      hostnames: [alertmanager.lab.internal]
+      parentRefs: *lab-gateway
+  alertmanagerSpec:
+    configMaps: [lab-ca]
+  config:
+    route:
+      receiver: ntfy
+      group_by: [alertname, namespace]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        # Always firing, to prove the alert pipeline works; not worth a notification.
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+        - receiver: "null"
+          matchers: ['alertname = "InfoInhibitor"']
+    receivers:
+      - name: "null"
+      # ntfy formats Alertmanager's webhook payload itself (template=alertmanager); subscribe to
+      # https://ntfy.lab.internal/lab-alerts in the browser or the ntfy app.
+      - name: ntfy
+        webhook_configs:
+          - url: https://ntfy.lab.internal/lab-alerts?template=alertmanager
+            send_resolved: true
+            http_config:
+              tls_config:
+                ca_file: /etc/alertmanager/configmaps/lab-ca/ca.crt
+
+grafana:
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  grafana.ini:
+    server:
+      root_url: https://grafana.lab.internal
+  route:
+    main:
+      enabled: true
+      hostnames: [grafana.lab.internal]
+      parentRefs: *lab-gateway

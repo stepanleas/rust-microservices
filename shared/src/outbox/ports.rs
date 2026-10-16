@@ -1,4 +1,4 @@
-use super::{MessageKind, OutboxMessage, OutboxStatus};
+use super::{MessageKind, OutboxBacklog, OutboxMessage, OutboxStatus};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -24,6 +24,9 @@ pub trait OutboxRepository<K: MessageKind>: Send + Sync {
 
     /// Deletes up to `limit` `COMPLETED` messages processed before `before`; returns how many.
     fn delete_completed(&self, before: DateTime<Utc>, limit: i64) -> anyhow::Result<usize>;
+
+    /// Counts the `STARTED` and `FAILED` messages and finds the oldest `STARTED` one.
+    fn backlog(&self) -> anyhow::Result<OutboxBacklog>;
 }
 
 /// Messages claimed by one relay, with the transaction that holds their locks.

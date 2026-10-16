@@ -22,6 +22,12 @@ database:
   cluster: ""
   maxConnections: 10
 
+# ServiceMonitor for kube-prometheus-stack (only rendered when its CRD exists).
+metrics:
+  enabled: true
+  path: /metrics
+  interval: 15s
+
 probes:
   startupPath: /api/health/startup
   livenessPath: /api/health/live

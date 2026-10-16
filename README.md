@@ -303,6 +303,8 @@ HTTP controllers only map DTOs and run a use case on the blocking thread pool
 | `db`              | `connect()`: r2d2 pool + embedded migrations                                  | infrastructure |
 | `kafka`           | `KafkaProducer`, `KafkaConsumer`, `listen()` with retries and DLQ             | messaging      |
 | `web`             | `ApiError`, `ErrorResponse`, `ValidatedJson`, correlation id middleware, `blocking()` | presentation |
+| `logging`         | `tracing-subscriber` setup (`RUST_LOG`, `LOG_FORMAT=json`)                    | starter        |
+| `observability`   | `logging` + Prometheus `/metrics` + OTLP trace export; with `web` the `HttpMetrics` middleware | starter, api-gateway |
 | `mocks`           | mockall mocks of the shared ports                                             | tests          |
 
 The services depend on it by path (`shared = { path = "../shared" }`), so a change to `shared` is
@@ -368,7 +370,7 @@ The same images run on a local [kind](https://kind.sigs.k8s.io) cluster, deploye
 
 ```bash
 make kind_tool      # downloads the pinned kind to .tools/bin (version: deploy/platform/versions.yaml)
-make kind_up        # 1 control plane + 2 workers; metrics-server, CloudNativePG, Strimzi, Envoy Gateway
+make kind_up        # 1 control plane + 2 workers; operators, Prometheus/Grafana/Loki/Tempo/Alloy
 make kind_images    # builds the 6 images (tag local) and loads them into the nodes
 make kind_deploy    # helm upgrade --install rust-microservices into namespace shop
 make kind_e2e       # the saga test through the gateway
@@ -377,8 +379,9 @@ make kind_down
 
 Needs Docker with about 6 CPUs and 12–16 GB of memory. Everything is reached through Envoy
 Gateway on `http://localhost:8088` (`KIND_HTTP_PORT`), e.g.
-`curl localhost:8088/shop/catalog/api/categories`; Kafka's external listener is on
-`localhost:9093` (`KIND_KAFKA_PORT`) for tools on the host.
+`curl localhost:8088/shop/catalog/api/categories`, and Grafana on
+http://localhost:8088/grafana (admin/admin, anonymous viewers allowed). Kafka's external
+listener is on `localhost:9093` (`KIND_KAFKA_PORT`) for tools on the host.
 
 ```
 deploy/
@@ -386,10 +389,12 @@ deploy/
 ├── platform/                    operators shared by kind and the homelab
 │   ├── versions.yaml            pinned kind version and node image
 │   ├── charts.yaml              pinned platform charts, install order, which target gets which
-│   └── <component>/             values.yaml (+ values-<target>.yaml), <target>/ manifests
+│   ├── <component>/             values.yaml (+ values-<target>.yaml), <target>/ manifests
+│   └── monitoring/              local chart: alert rules, Grafana dashboards, extra scrape targets
 ├── argocd/                      the homelab's Argo CD Applications (app of apps)
 ├── helm/
-│   ├── rust-service/            one service: Deployment, Service, ConfigMap, HPA, PDB, probes
+│   ├── rust-service/            one service: Deployment, Service, ConfigMap, HPA, PDB, probes,
+│   │                            ServiceMonitor
 │   └── rust-microservices/      umbrella: rust-service aliased per service, CNPG Cluster + Pooler
 │                                per service, Strimzi Kafka (1 KRaft node) + 22 KafkaTopics,
 │                                Gateway + HTTPRoute -> api-gateway; values-kind / values-lab
@@ -439,6 +444,9 @@ troubleshooting: [infra/README.md](infra/README.md).
 | `OUTBOX_RETENTION_HOURS`  | `24`                     | order, restaurant, payment |
 | `RUST_LOG`                | `info`                   | all                        |
 | `LOG_FORMAT`              | unset (readable)         | all; `json` for one JSON object per line |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset (no traces)    | all; OTLP/HTTP collector, e.g. `http://alloy.monitoring:4318` |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` | all; e.g. `parentbased_traceidratio` + `0.1` |
+| `OTEL_SERVICE_NAME`       | the service's name       | all                        |
 | `MICROSERVICE_<NAME>_URL` | `http://localhost:<port>` | api-gateway (one per service) |
 | `CONNECT_TIMEOUT_MS` / `RESPONSE_TIMEOUT_MS` | `1000` / `10000` | api-gateway |
 | `CB_SLIDING_WINDOW_SIZE`, `CB_FAILURE_RATE_THRESHOLD`, `CB_PERMITTED_CALLS_IN_HALF_OPEN`, `CB_WAIT_IN_OPEN_MS` | `10`, `50`, `2`, `10000` | api-gateway |
@@ -471,13 +479,43 @@ Every service can run several replicas:
   Kubernetes the services use `DB_MAX_CONNECTIONS=10` and connect through PgBouncer, which then
   bounds the server-side connections instead.
 
-### Logs
+### Observability
 
-The services log through `tracing`. With `LOG_FORMAT=json` every line is a JSON object that
-also carries the fields of the enclosing spans: `correlation_id` for HTTP requests (from the
+**Logs.** The services log through `tracing`. With `LOG_FORMAT=json` every line is a JSON object
+that also carries the fields of the enclosing spans: `correlation_id` for HTTP requests (from the
 `X-Correlation-ID` header, generated when missing), `topic`, `partition`, `offset` and `key` for
-Kafka messages (the key is the order id on the saga topics), and `message_id`, `saga_id` and
-`message_type` for outbox publishes.
+Kafka messages (the key is the order id on the saga topics), `message_id`, `saga_id` and
+`message_type` for outbox publishes, and `trace_id` when traces are exported.
+
+**Metrics.** Every service and the gateway serve `GET /metrics` (Prometheus text format):
+
+| Metric | Labels | From |
+|---|---|---|
+| `http_requests_total`, `http_request_duration_seconds` | `method`, `route` (template), `status` | all |
+| `db_pool_connections`, `db_pool_wait_seconds`, `db_pool_timeouts_total` | `state` | all |
+| `kafka_messages_handled_total`, `kafka_handler_duration_seconds` | `topic`, `result` = ok/retry/dlq | consumers |
+| `kafka_consumer_assigned_partitions` | `topic` | consumers |
+| `outbox_messages` (STARTED/FAILED), `outbox_oldest_started_age_seconds` | `status` | order, restaurant, payment |
+| `outbox_publish_total`, `outbox_publish_duration_seconds` | `type`, `result` | order, restaurant, payment |
+| `saga_started_total`, `saga_completed_total`, `saga_duration_seconds`, `saga_compensations_total` | `outcome` = paid/rejected/payment_failed | order |
+| `restaurant_order_approvals_total`, `restaurant_order_cancellations_total` | `decision` | restaurant |
+| `payments_processed_total` | `status` | payment |
+| `gateway_upstream_requests_total`, `gateway_upstream_duration_seconds` | `service`, `outcome` | api-gateway |
+| `gateway_circuit_breaker_state` (0 closed, 1 half-open, 2 open), `gateway_circuit_breaker_rejected_total` | `breaker` / `service` | api-gateway |
+
+**Traces.** With `OTEL_EXPORTER_OTLP_ENDPOINT` set, spans go out over OTLP/HTTP. One trace
+follows an order all the way: the gateway continues or starts it (W3C `traceparent`) and passes
+it upstream, an outbox row stores the `traceparent` of the transaction that wrote it, the relay
+publishes the message in that trace with a `traceparent` Kafka header, and the consumer
+continues it, so restaurant's and payment's work and their replies land in the same trace.
+
+**In Kubernetes** (`deploy/platform`): kube-prometheus-stack (Prometheus, Alertmanager, Grafana),
+Loki and Tempo (monolithic, on volumes), and Grafana Alloy on every node shipping the pod logs to
+Loki and the services' spans to Tempo. Grafana links the three: a log line's `trace_id` opens
+the trace, a span opens the logs of every service it touched, and Tempo's span metrics carry
+exemplars back to traces. Dashboards (folder *Shop*): system overview (with the slowest
+requests), service detail, load balancing, saga & Kafka, Postgres. The alert rules live in
+`deploy/platform/monitoring/rules/`.
 
 ---
 

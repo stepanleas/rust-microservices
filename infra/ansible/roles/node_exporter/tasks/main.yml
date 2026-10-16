@@ -1,10 +1,30 @@
 # Host metrics of the ops VM, scraped by Prometheus in the cluster (Phase 5). The Kubernetes
 # nodes get node-exporter from kube-prometheus-stack instead.
-- name: Directory
+- name: Directories
   ansible.builtin.file:
-    path: /opt/lab/node-exporter
+    path: "/opt/lab/node-exporter/{{ item }}"
     state: directory
     mode: "0755"
+  loop: ["", textfile]
+
+# The lab CA and the wildcard certificate (Caddy, the lab Gateway) are files on the Ansible host:
+# their expiry becomes a metric (alert LabCertificateExpiring), refreshed by every provisioning
+# run, which is also what renews the wildcard certificate.
+- name: Expiry of the lab certificates
+  ansible.builtin.shell:
+    cmd: set -o pipefail; date -d "$(openssl x509 -noout -enddate -in {{ lab_ca_dir }}/{{ item }}.crt | cut -d= -f2)" +%s
+    executable: /bin/bash
+  loop: [ca, wildcard]
+  register: lab_certificates
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Certificate expiry metric
+  ansible.builtin.template:
+    src: lab_certificates.prom.j2
+    dest: /opt/lab/node-exporter/textfile/lab_certificates.prom
+    mode: "0644"
 
 - name: Compose file
   ansible.builtin.template:

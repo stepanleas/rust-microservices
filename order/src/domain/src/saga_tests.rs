@@ -45,11 +45,21 @@ fn test_invalid_transitions_are_rejected() {
     let mut saga = OrderSaga::start(OrderId::new());
     assert!(saga.payment_completed().is_err());
 
-    let mut finished = OrderSaga::restore(Uuid::new_v4(), OrderId::new(), SagaStatus::Succeeded);
+    let mut finished = OrderSaga::restore(
+        Uuid::new_v4(),
+        OrderId::new(),
+        SagaStatus::Succeeded,
+        chrono::Utc::now(),
+    );
     assert!(finished.fail().is_err());
     assert!(finished.restaurant_approved().is_err());
 
-    let mut failed = OrderSaga::restore(Uuid::new_v4(), OrderId::new(), SagaStatus::Failed);
+    let mut failed = OrderSaga::restore(
+        Uuid::new_v4(),
+        OrderId::new(),
+        SagaStatus::Failed,
+        chrono::Utc::now(),
+    );
     let error = failed.restaurant_approved().unwrap_err().to_string();
     assert!(
         error.contains("cannot move from FAILED to PROCESSING"),

@@ -8,6 +8,8 @@ use axum::{
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 
 use crate::{circuit_breaker::CircuitBreaker, config::Settings};
+use shared::trace_context::{self, TRACEPARENT};
+use tracing::Instrument;
 
 pub const RESPONSE_TIME: &str = "x-response-time";
 const FALLBACK_MESSAGE: &str =
@@ -56,7 +58,14 @@ impl ProxyState {
 }
 
 /// Handles `/shop/{service}` and `/shop/{service}/{*rest}` by forwarding the
-/// request to `<upstream>/{rest}` with the prefix stripped.
+/// request to `<upstream>/{rest}` with the prefix stripped, in the current trace.
+///
+/// Metrics per upstream service:
+///
+/// - `gateway_upstream_requests_total{service, outcome="ok"|"error"|"timeout"}`
+/// - `gateway_upstream_duration_seconds{service, outcome}`: until the response headers (histogram)
+/// - `gateway_circuit_breaker_rejected_total{service}`: calls the open circuit refused
+/// - `gateway_circuit_breaker_state{breaker}` (see `CircuitBreaker`)
 pub async fn forward(
     State(state): State<Arc<ProxyState>>,
     Path(params): Path<HashMap<String, String>>,
@@ -73,6 +82,8 @@ pub async fn forward(
     };
 
     let Some(permit) = upstream.breaker.try_acquire() else {
+        metrics::counter!("gateway_circuit_breaker_rejected_total", "service" => service.to_string())
+            .increment(1);
         tracing::warn!(service, "circuit open, returning fallback");
         return with_response_time(fallback(), started);
     };
@@ -85,15 +96,40 @@ pub async fn forward(
     }
 
     let (parts, body) = request.into_parts();
-    let headers = forwarded_headers(&parts.headers, client_addr, service);
+    // The client side of the call: the upstream continues this span, which pairs the two
+    // (Tempo's service graph shows api-gateway -> <service>) and times the upstream on its own.
+    let upstream_span = tracing::info_span!(
+        "upstream_request",
+        otel.name = format!("{} {}", parts.method, service),
+        otel.kind = "client",
+        peer.service = service,
+    );
+    let headers =
+        upstream_span.in_scope(|| forwarded_headers(&parts.headers, client_addr, service));
     let upstream_request = state
         .client
         .request(parts.method, &url)
         .headers(headers)
         .body(reqwest::Body::wrap_stream(body.into_data_stream()));
 
-    let response = match tokio::time::timeout(state.response_timeout, upstream_request.send()).await
-    {
+    let upstream_started = Instant::now();
+    let result = tokio::time::timeout(state.response_timeout, upstream_request.send())
+        .instrument(upstream_span)
+        .await;
+    let outcome = match &result {
+        Ok(Ok(_)) => "ok",
+        Ok(Err(_)) => "error",
+        Err(_) => "timeout",
+    };
+    let labels = [
+        ("service", service.to_string()),
+        ("outcome", outcome.to_string()),
+    ];
+    metrics::counter!("gateway_upstream_requests_total", &labels).increment(1);
+    metrics::histogram!("gateway_upstream_duration_seconds", &labels)
+        .record(upstream_started.elapsed().as_secs_f64());
+
+    let response = match result {
         Ok(Ok(response)) => {
             // Like the Spring circuit breaker filter, only transport errors and
             // timeouts count as failures; a 5xx is a valid upstream answer.
@@ -165,6 +201,11 @@ fn forwarded_headers(incoming: &HeaderMap, client_addr: SocketAddr, service: &st
         if let Some(value) = value.and_then(|v| HeaderValue::from_str(&v).ok()) {
             headers.insert(HeaderName::from_static(name), value);
         }
+    }
+    // The upstream continues the gateway's (client) span, not the caller's.
+    headers.remove(TRACEPARENT);
+    if let Some(value) = trace_context::current().and_then(|v| HeaderValue::from_str(&v).ok()) {
+        headers.insert(TRACEPARENT, value);
     }
 
     headers

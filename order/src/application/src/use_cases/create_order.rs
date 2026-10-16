@@ -50,6 +50,7 @@ impl CreateOrder {
         )?;
 
         self.saga_repository.start(&order, &saga, &message)?;
+        metrics::counter!("saga_started_total").increment(1);
         tracing::info!(
             "Order created with id: {}, saga {} started",
             order.id(),

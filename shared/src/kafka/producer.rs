@@ -1,3 +1,4 @@
+use crate::trace_context::{self, TRACEPARENT};
 use rdkafka::ClientConfig;
 use rdkafka::message::{Header, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -45,8 +46,17 @@ impl KafkaProducer {
     }
 
     /// Sends a keyed record. Messages with the same key (e.g. one order) keep their order.
+    /// Carries the current trace (`traceparent` header), so the consumer continues it.
     pub fn send(&mut self, topic: &str, key: &str, payload: &[u8]) -> anyhow::Result<()> {
-        self.send_with_headers(topic, key, payload, &[])
+        match trace_context::current() {
+            Some(traceparent) => self.send_with_headers(
+                topic,
+                key,
+                payload,
+                &[(TRACEPARENT, traceparent.as_bytes())],
+            ),
+            None => self.send_with_headers(topic, key, payload, &[]),
+        }
     }
 
     /// Like [`Self::send`], with record headers (e.g. the W3C `traceparent`).

@@ -9,6 +9,16 @@ global:
   environment: production
   # Kafka bootstrap address used by the services: <kafka.name>-kafka-bootstrap:9092.
   kafkaBootstrap: kafka-kafka-bootstrap:9092
+  # OTLP/HTTP endpoint the services send their traces to (the node's Alloy agent, see
+  # deploy/platform/alloy); empty = no traces. `sampleRatio` of the new traces are kept.
+  tracing:
+    endpoint: http://alloy.monitoring:4318
+    sampleRatio: "1.0"
+
+# PodMonitors for the CloudNativePG clusters and Kafka, Kafka's own metrics and the
+# kafka-exporter (consumer lag). The services' ServiceMonitors: `metrics` of each service.
+metrics:
+  enabled: true
 
 kafka:
   # Strimzi Kafka cluster name; clients use <name>-kafka-bootstrap:9092.
@@ -80,6 +90,9 @@ x-common-env: &common-env
   KAFKA_HOST: "{{ .Values.global.kafkaBootstrap }}"
   RUST_LOG: info
   LOG_FORMAT: json
+  OTEL_EXPORTER_OTLP_ENDPOINT: "{{ .Values.global.tracing.endpoint }}"
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "{{ .Values.global.tracing.sampleRatio }}"
 
 catalog:
   port: 8080
@@ -122,6 +135,9 @@ api-gateway:
   env:
     RUST_LOG: info
     LOG_FORMAT: json
+    OTEL_EXPORTER_OTLP_ENDPOINT: "{{ .Values.global.tracing.endpoint }}"
+    OTEL_TRACES_SAMPLER: parentbased_traceidratio
+    OTEL_TRACES_SAMPLER_ARG: "{{ .Values.global.tracing.sampleRatio }}"
     MICROSERVICE_CATALOG_URL: http://catalog:8080
     MICROSERVICE_CUSTOMER_URL: http://customer:8082
     MICROSERVICE_ORDER_URL: http://order:8081

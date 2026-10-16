@@ -2,7 +2,7 @@ use crate::outbox::{OrderApprovalCancelEventPayload, OrderOutboxMessage, OutboxM
 use crate::ports::out::repositories::OrderRepository;
 use crate::ports::out::saga_store::OrderSagaRepository;
 use crate::saga::dtos::PaymentResponse;
-use crate::saga::{load_pending_step, store_step};
+use crate::saga::{load_pending_step, record_saga_end, store_step};
 use domain::saga::SagaStatus;
 use shared::error::AppResult;
 use std::sync::Arc;
@@ -51,6 +51,7 @@ impl PaymentSaga {
             SagaStatus::Processing,
             None,
         )? {
+            record_saga_end(&saga, "paid");
             tracing::info!(
                 "Order {} paid with payment {}",
                 response.order_id,
@@ -92,6 +93,8 @@ impl PaymentSaga {
             SagaStatus::Processing,
             Some(compensation),
         )? {
+            record_saga_end(&saga, "payment_failed");
+            metrics::counter!("saga_compensations_total").increment(1);
             tracing::info!(
                 "Payment failed for order {}: {:?}. Restaurant approval cancellation requested",
                 response.order_id,

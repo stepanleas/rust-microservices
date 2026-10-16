@@ -70,5 +70,21 @@ spec:
       min.insync.replicas: 1
       num.partitions: {{ $kafka.partitions }}
       group.initial.rebalance.delay.ms: 0
+    {{- if $.Values.metrics.enabled }}
+    # Broker metrics in the Prometheus format on port 9404 (PodMonitor `kafka`).
+    metricsConfig:
+      type: strimziMetricsReporter
+      values:
+        allowList:
+          - "kafka_server_.*"
+          - "kafka_network_.*"
+          - "kafka_log_.*"
+          - "kafka_controller_.*"
+          - "kafka_coordinator_group_.*"
+  # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics).
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    {{- end }}
   entityOperator:
     topicOperator: {}

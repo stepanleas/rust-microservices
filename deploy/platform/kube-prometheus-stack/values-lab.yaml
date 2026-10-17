@@ -57,3 +57,20 @@ grafana:
       enabled: true
       hostnames: [grafana.lab.internal]
       parentRefs: *lab-gateway
+
+# Grafana's admin login (grafana.admin.existingSecret), sealed for the lab's controller:
+# make seal NAME=grafana-admin NS=monitoring FROM=~/.lab/grafana-admin.env
+extraManifests:
+  - apiVersion: bitnami.com/v1alpha1
+    kind: SealedSecret
+    metadata:
+      name: grafana-admin
+      namespace: monitoring
+    spec:
+      encryptedData:
+        admin-password: AgBfmZpzgi0Djx1kJVcDoZsuSYqpPYc2DsOP4xcNTeoD6UGA7Hks8c6MJs0WX0Ld1CN02D8B0Cp+CQcfz1nTRsMoIIuxwDX2swUpsmGIaULIr2F5mQAm0L4wt9b4ulMS25SnL1QTA3FiR1/WEtiHQrGsHOFyUr86aiHF0RdEperljX6xPb2v1eb3f+yBr7sxEY97zWU0QIUcJynhxaiWoconTVgDokfbmoM2TXpAaSJVW3X4TolwY/aLfUb9qlxi4mq1AqiiiLttsdQLK68g+Z3ZKQY53pyoVeWW+DaiqFXidcWsmbrhD+uExyZzuKv6Jzam+wj99Wse55zNJ3e2u6JsO5un6GWUiNf5M9JsQlyTYCo4ffw6zpGZHyJcHLhqFfIKbNoNEnyhm0URwriJdu9DGHD6sS5BU+639axtOn8hhjt8YMZo6cseIzXRhXZM5N1A1ZTI7XlAjNNxjiEhm4S/qg/jMUEmNkGdt0TIpHZpECaeYHIOlhjyaeFag6dMwGjMrYdX4+eJKi8pO62rF81bGAdnBwmFl2F2ZB88Np2e41sgG38KOqBkQeEXjip6HiQUYr1IPus15wOEpIV73bq8Q6Blz2EE0wLjdbtBm4hnOVwr+wmQFWVgSmlcx0tX/ccxOGF1uoOYhOUcDs4CdCyo7pINQIg9TaF/zAaGK1szIJdSfa+9m5lrtrMaLOXO6bdI3Rz2HNjxcdIQh0gI+bJOOYNZF+RiEc4NkDV5YO4m/Q==
+        admin-user: AgA7qE1brHMprU1GdXp1+Nk0GOUSG+q18qx6YmgdEVSuP4jnFQlqEwhGxkgZj2xQrQMDPGGLo36fGXP4kO50tgnb0q3F9iGVb63QlcU5z/yiS6h0VvISdTreMhwc1Mu9ruwuugBN++U3wZyG0gFYLPtXRiq6Li+eziGWPd9uJ/v2oV8nFkQXL6n/ou6qjNBcsLK/nanqBdkZWPtcLcSJ98nEbkTeJHX/RbbLgYv8sX8obEzCf8z6ommPmPcbaGFgIQ3BxNN4p++I/MPkYzqNGDwxdOcjPUKCbFmEezK4iKWkD8J+i4O84O4PLhspSS/KDojOExmSdtVc2lNfpukH9GFlBUtehDfS/uty3SBBoZCLiXuMBpI0yhGFLLFAkeug343T7tZnUz346AjCTsihLsR5lqWPjvzJCK8BXAgbj8LEkdLUgQzQUAW1Xfq9XjBybqFK9ieBfs3NKRmBYatA/vsXQ6Ah5g1Gv7uLafvmzvwRCmA6KeMKMXbWNyolx1MDGaPifk9NpNli6Q7tIWPICleX9Jb809vwP9WYZVrx97J4i3DDJY75Ks+nrqH1HIitNOMfReMQSBvXdTZx4So3YZK9Qg+e5qB4HD5t+55yj1L07Ubl/Vmjub9+No6yL+G2hLQ50vvwG6ULKg295AjufMeiqMwl3kWMZqnqZCtIxw2DAL/fwIBdTfesuVCQjlBMqFpK7gXr3Q==
+      template:
+        metadata:
+          name: grafana-admin
+          namespace: monitoring

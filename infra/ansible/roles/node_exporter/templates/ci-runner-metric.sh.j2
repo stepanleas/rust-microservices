@@ -1,0 +1,15 @@
+#!/bin/sh
+# Managed by Ansible (node_exporter role). Whether the Forgejo Actions runner container runs, for
+# the LabCiRunnerOffline alert; a systemd timer calls it every minute.
+set -eu
+out=/opt/lab/node-exporter/textfile/lab_ci_runner.prom
+{% raw %}
+running=$(docker inspect -f '{{.State.Running}}' forgejo-runner 2>/dev/null || echo false)
+{% endraw %}
+[ "$running" = true ] && value=1 || value=0
+cat > "$out.tmp" <<METRIC
+# HELP lab_ci_runner_up Whether the Forgejo Actions runner container is running (1) or not (0).
+# TYPE lab_ci_runner_up gauge
+lab_ci_runner_up{runner="forgejo-runner"} $value
+METRIC
+mv "$out.tmp" "$out"

@@ -1,0 +1,7 @@
+# Managed by Ansible (node_exporter role).
+[Unit]
+Description=Write the CI runner's state for node-exporter
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lab/node-exporter/ci-runner-metric.sh

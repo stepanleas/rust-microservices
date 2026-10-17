@@ -26,6 +26,31 @@
     dest: /opt/lab/node-exporter/textfile/lab_certificates.prom
     mode: "0644"
 
+# The CI runner has no metrics of its own (and Forgejo reports runners only to admins): a timer
+# exports whether its container runs (alert LabCiRunnerOffline).
+- name: CI runner state script
+  ansible.builtin.template:
+    src: ci-runner-metric.sh.j2
+    dest: /opt/lab/node-exporter/ci-runner-metric.sh
+    mode: "0755"
+
+- name: CI runner state service and timer
+  ansible.builtin.template:
+    src: "lab-ci-runner-metric.{{ item }}.j2"
+    dest: "/etc/systemd/system/lab-ci-runner-metric.{{ item }}"
+    mode: "0644"
+  loop: [service, timer]
+  notify: Reload systemd
+
+- name: Flush handlers (systemd knows the units)
+  ansible.builtin.meta: flush_handlers
+
+- name: CI runner state timer running
+  ansible.builtin.systemd_service:
+    name: lab-ci-runner-metric.timer
+    state: started
+    enabled: true
+
 - name: Compose file
   ansible.builtin.template:
     src: compose.yaml.j2

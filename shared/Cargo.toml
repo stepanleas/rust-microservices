@@ -62,6 +62,7 @@ opentelemetry-otlp = { version = "0.33.1", default-features = false, features = 
 tracing-opentelemetry = { version = "0.34.0", default-features = false, optional = true }
 
 [dev-dependencies]
+criterion = "0.8.2"
 testcontainers = "0.27.3"
 testcontainers-modules = { version = "0.15.0", features = ["kafka", "postgres"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
@@ -81,3 +82,8 @@ required-features = ["outbox-postgres"]
 [[example]]
 name = "fail_payment"
 required-features = ["contracts", "kafka", "outbox"]
+
+[[bench]]
+name = "avro"
+harness = false
+required-features = ["contracts"]

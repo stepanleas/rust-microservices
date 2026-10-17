@@ -19,8 +19,18 @@ pub struct Settings {
     pub http_url: String,
     pub connect_timeout: Duration,
     pub response_timeout: Duration,
+    pub pool: PoolConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     pub routes: Vec<RouteConfig>,
+}
+
+/// Keep-alive connections to the upstreams. Kubernetes balances a Service per connection, so
+/// connections that live forever pin the traffic to the pods that existed when they opened:
+/// closing idle and surplus connections lets new ones spread over the current pods.
+#[derive(Clone, Debug)]
+pub struct PoolConfig {
+    pub idle_timeout: Duration,
+    pub max_idle_per_host: usize,
 }
 
 /// `/shop/<name>/<rest>` is forwarded to `<upstream>/<rest>`.
@@ -48,6 +58,10 @@ impl Settings {
             http_url: env::var("HTTP_URL").unwrap_or_else(|_| "0.0.0.0:8070".to_string()),
             connect_timeout: Duration::from_millis(env_or("CONNECT_TIMEOUT_MS", 1_000)?),
             response_timeout: Duration::from_millis(env_or("RESPONSE_TIMEOUT_MS", 10_000)?),
+            pool: PoolConfig {
+                idle_timeout: Duration::from_millis(env_or("POOL_IDLE_TIMEOUT_MS", 30_000)?),
+                max_idle_per_host: env_or("POOL_MAX_IDLE_PER_HOST", 32)?,
+            },
             circuit_breaker: CircuitBreakerConfig {
                 sliding_window_size: env_or("CB_SLIDING_WINDOW_SIZE", 10)?,
                 permitted_calls_in_half_open: env_or("CB_PERMITTED_CALLS_IN_HALF_OPEN", 2)?,

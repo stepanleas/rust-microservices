@@ -45,6 +45,20 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
+  # A KEDA ScaledObject instead of the HorizontalPodAutoscaler, when the KEDA CRDs exist. It keeps
+  # the CPU target and adds the triggers below; the replicas can be pinned with the
+  # `autoscaling.keda.sh/paused-replicas` annotation (deploy/scripts/replicas.sh).
+  keda:
+    enabled: false
+    # Kafka consumer lag of the group, summed over its topics: one replica per `lagThreshold`
+    # messages, never more replicas than partitions. Empty group = no lag trigger.
+    kafka:
+      consumerGroup: ""
+      lagThreshold: 100
+    # Requests/s to this service (http_requests_total, health checks excluded): one replica per
+    # `threshold`. 0 = no requests trigger. The Prometheus URL: global.autoscaling.prometheusUrl.
+    requestsPerSecond:
+      threshold: 0
 
 podDisruptionBudget:
   minAvailable: 1

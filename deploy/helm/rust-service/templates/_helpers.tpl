@@ -24,6 +24,13 @@ app.kubernetes.io/part-of: rust-microservices
 {{- printf "%s:%s" $repository (.Values.image.tag | default $global.tag | default "latest") -}}
 {{- end -}}
 
+{{- /* "true" when a KEDA ScaledObject replaces the HorizontalPodAutoscaler. */ -}}
+{{- define "rust-service.keda" -}}
+{{- if and .Values.autoscaling.enabled .Values.autoscaling.keda.enabled (.Capabilities.APIVersions.Has "keda.sh/v1alpha1/ScaledObject") -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "rust-service.pullPolicy" -}}
 {{- $global := (.Values.global | default dict).image | default dict -}}
 {{- .Values.image.pullPolicy | default $global.pullPolicy | default "IfNotPresent" -}}

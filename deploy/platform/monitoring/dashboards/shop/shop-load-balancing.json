@@ -1,7 +1,7 @@
 {
   "uid": "shop-load-balancing",
   "title": "Shop / Load balancing",
-  "description": "How the load spreads over the replicas: requests and CPU per pod, autoscaling, Kafka partitions per consumer.",
+  "description": "How the load spreads over the replicas: requests and CPU per pod, autoscaling (KEDA), Kafka partitions per consumer.",
   "tags": [
     "shop"
   ],
@@ -71,7 +71,7 @@
     {
       "type": "table",
       "title": "Request skew per service (max/min pod requests/s, last 5 min)",
-      "description": "1.0 = perfectly even. Phase 6 targets per-pod RPS within \u00b120%.",
+      "description": "1.0 = perfectly even. Phase 6 targets per-pod RPS within ±20%.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -241,8 +241,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Replicas (HPA desired vs. current)",
-      "description": "",
+      "title": "Replicas (desired vs. current)",
+      "description": "The HorizontalPodAutoscaler of each service: keda-hpa-<service> when KEDA scales it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -253,7 +253,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"shop\", horizontalpodautoscaler=~\"$service\"}",
+          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"shop\", horizontalpodautoscaler=~\"(keda-hpa-)?($service)\"}",
           "legendFormat": "{{horizontalpodautoscaler}} desired",
           "refId": "A",
           "range": true,
@@ -264,7 +264,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"shop\", horizontalpodautoscaler=~\"$service\"}",
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"shop\", horizontalpodautoscaler=~\"(keda-hpa-)?($service)\"}",
           "legendFormat": "{{horizontalpodautoscaler}} current",
           "refId": "B",
           "range": true,
@@ -538,6 +538,75 @@
         "w": 12,
         "x": 12,
         "y": 25
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Autoscaler inputs (KEDA, per trigger)",
+      "description": "What each KEDA trigger reports: CPU utilization, Kafka consumer lag, requests/s. The replicas follow the trigger that asks for the most (value / threshold). Paused = pinned by make pin_replicas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (scaledObject, scaler, metric) (keda_scaler_metrics_value{scaledObject=~\"$service\"})",
+          "legendFormat": "{{scaledObject}} {{scaler}}",
+          "refId": "A",
+          "range": true,
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (scaledObject) (keda_scaled_object_paused{scaledObject=~\"$service\"})",
+          "legendFormat": "{{scaledObject}} paused",
+          "refId": "B",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 33
       }
     }
   ]

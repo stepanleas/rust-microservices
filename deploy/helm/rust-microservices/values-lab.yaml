@@ -15,10 +15,12 @@ postgres:
 
 gateway:
   hostname: shop.lab.internal
+  directRoutes: true
   parentRef: {name: lab, namespace: envoy-gateway-system, sectionName: https}
 
+# Room to scale out under load (Phase 6); the load tests pin 1 or 3 (make pin_replicas).
 catalog: &small
-  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 3}
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4}
 customer: *small
 order: *small
 restaurant: *small

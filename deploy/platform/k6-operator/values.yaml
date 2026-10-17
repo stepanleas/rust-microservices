@@ -1,0 +1,9 @@
+# Distributed load tests inside the cluster (Phase 7): a TestRun starts `parallelism` k6 runners,
+# see load-tests/scripts/run-k8s.sh.
+# The namespace comes from the installer (helm --create-namespace / Argo CD CreateNamespace).
+namespace:
+  create: false
+manager:
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 256Mi}

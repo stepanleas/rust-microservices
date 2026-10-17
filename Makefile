@@ -111,6 +111,39 @@ kind_e2e:
 kind_down:
 	./deploy/scripts/kind-down.sh
 
+# Fixed replicas for every service (KEDA paused), e.g. comparable load-test runs, and back to
+# autoscaling: make pin_replicas N=3 [TARGET=lab]; make unpin_replicas [TARGET=lab]
+pin_replicas:
+	@test -n "$(N)" || { echo "usage: make pin_replicas N=<count> [TARGET=kind|lab]"; exit 1; }
+	TARGET=$(TARGET) ./deploy/scripts/replicas.sh pin $(N)
+
+unpin_replicas:
+	TARGET=$(TARGET) ./deploy/scripts/replicas.sh unpin
+
+
+# --- Load tests: k6 (load-tests/) ----------------------------------------------------------------
+# make load_tool load_seed; make load SCENARIO=mixed; make load_verify     TARGET=kind (default) | lab
+
+# Downloads the k6 version pinned in deploy/platform/versions.yaml to .tools/bin.
+load_tool:
+	./load-tests/scripts/k6-tool.sh
+
+# Customers and products with a huge stock, once per cluster.
+load_seed:
+	SCENARIO=seed TARGET=$(TARGET) ./load-tests/scripts/run.sh
+
+# k6 on this machine: make load SCENARIO=smoke|read-heavy|place-orders|mixed|stress|spike|soak|one-million
+load:
+	SCENARIO=$(SCENARIO) TARGET=$(TARGET) ./load-tests/scripts/run.sh
+
+# k6 inside the cluster (k6-operator), runners on the control plane: make load_k8s SCENARIO=one-million PARALLELISM=4
+load_k8s:
+	SCENARIO=$(SCENARIO) PARALLELISM=$(PARALLELISM) TARGET=$(TARGET) ./load-tests/scripts/run-k8s.sh
+
+# After a run: no stuck saga, no FAILED outbox row, empty DLQs, consistent restaurant stock.
+load_verify:
+	TARGET=$(TARGET) ./load-tests/scripts/verify.sh
+
 
 # --- Homelab: Vagrant VMs + Ansible + kubeadm (infra/) ----------------------------------------
 # Once: make lab_tools lab_host     Then: make lab_up lab_verify     See infra/README.md.

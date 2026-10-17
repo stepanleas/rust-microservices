@@ -1,0 +1,42 @@
+{{- if include "rust-service.keda" . }}
+{{- $name := include "rust-service.name" . }}
+{{- $keda := .Values.autoscaling.keda }}
+{{- $global := .Values.global | default dict }}
+# KEDA owns the HorizontalPodAutoscaler (keda-hpa-<name>) and feeds it these triggers; the
+# replicas follow whichever asks for the most.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "rust-service.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ .Values.autoscaling.targetCPUUtilizationPercentage | quote }}
+    {{- with $keda.kafka.consumerGroup }}
+    # The operator runs in another namespace: qualify the bootstrap Service.
+    {{- $bootstrap := required "global.kafkaBootstrap is required for the Kafka lag trigger" $global.kafkaBootstrap }}
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ regexReplaceAll "^([^.:]+):" $bootstrap (printf "${1}.%s:" $.Release.Namespace) | quote }}
+        consumerGroup: {{ . | quote }}
+        lagThreshold: {{ $keda.kafka.lagThreshold | quote }}
+        # As the consumers' auto.offset.reset: no committed offset = the whole partition is lag.
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "false"
+    {{- end }}
+    {{- if $keda.requestsPerSecond.threshold }}
+    - type: prometheus
+      metadata:
+        serverAddress: {{ required "global.autoscaling.prometheusUrl is required for the requests trigger" ($global.autoscaling | default dict).prometheusUrl | quote }}
+        query: sum(rate(http_requests_total{namespace="{{ $.Release.Namespace }}", service="{{ $name }}", route!~"/api/health/.*"}[1m]))
+        threshold: {{ $keda.requestsPerSecond.threshold | quote }}
+    {{- end }}
+{{- end }}

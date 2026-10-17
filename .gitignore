@@ -2,3 +2,6 @@
 volumes/
 .tools/
 infra/.vagrant/
+
+# Load-test reports (load-tests/scripts/run.sh); baselines go into load-tests/README.md.
+load-tests/reports/

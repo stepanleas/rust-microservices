@@ -42,4 +42,20 @@ spec:
       backendRefs:
         - name: api-gateway
           port: {{ index .Values "api-gateway" "port" }}
+    {{- if .Values.gateway.directRoutes }}
+    {{- range $service := list "catalog" "customer" "order" "restaurant" "payment" }}
+    # /direct/{{ $service }}/<rest> -> {{ $service }}/<rest>, skipping the api-gateway hop.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /direct/{{ $service }}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+      backendRefs:
+        - name: {{ $service }}
+          port: {{ (index $.Values $service).port }}
+    {{- end }}
+    {{- end }}
 {{- end }}

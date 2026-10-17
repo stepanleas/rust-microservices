@@ -16,6 +16,9 @@ kafka:
 postgres:
   storageSize: 1Gi
 
+gateway:
+  directRoutes: true
+
 catalog: &small
   autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 3}
 customer: *small

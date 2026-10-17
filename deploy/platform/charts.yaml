@@ -67,6 +67,26 @@
   chart: alloy
   version: 1.13.1
   namespace: monitoring
+# Autoscaling on consumer lag and requests/s (Phase 6).
+- name: keda
+  repo: https://kedacore.github.io/charts
+  chart: keda
+  version: 2.21.0
+  namespace: keda
+  # The operator generates its certificate and patches the CA into these at runtime.
+  ignoreDifferences:
+    - group: apiregistration.k8s.io
+      kind: APIService
+      jsonPointers: [/spec/caBundle, /spec/insecureSkipTLSVerify]
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions: ['.webhooks[]?.clientConfig.caBundle']
+# In-cluster k6 runners for the load tests (Phase 7).
+- name: k6-operator
+  repo: https://grafana.github.io/helm-charts
+  chart: k6-operator
+  version: 4.6.0
+  namespace: k6-operator
 # The shop's and the lab's scrape targets, alert rules and dashboards (needs the
 # kube-prometheus-stack CRDs).
 - name: monitoring

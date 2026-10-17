@@ -10,6 +10,7 @@ on:
     paths:
       - "infra/**"
       - "deploy/**"
+      - "load-tests/**"
       - ".github/workflows/infra.yml"
   pull_request:
     branches:
@@ -17,6 +18,7 @@ on:
     paths:
       - "infra/**"
       - "deploy/**"
+      - "load-tests/**"
       - ".github/workflows/infra.yml"
 
 concurrency:
@@ -86,6 +88,17 @@ jobs:
 
       # Validates against the Kubernetes version of the lab, and the operators' CRDs (Kafka,
       # CNPG Cluster, Gateway, Argo CD Application, ...) against the community schema catalog.
+      # Every load-test script parses and builds its scenarios (k6 version from versions.yaml).
+      - name: k6 inspect
+        run: |
+          version=$(sed -n '/^k6:/,/version:/s/^  version: //p' deploy/platform/versions.yaml)
+          curl -fsSL "https://github.com/grafana/k6/releases/download/$version/k6-$version-linux-amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" --strip-components 1 "k6-$version-linux-amd64/k6"
+          for script in load-tests/k6/seed.js load-tests/k6/scenarios/*.js; do
+            echo "== $script"
+            "$RUNNER_TEMP/k6" inspect --execution-requirements "$script" >/dev/null
+          done
+
       - name: kubeconform
         run: |
           version=$(sed -n 's/^kubernetes_version: //p' infra/ansible/inventory/group_vars/all/main.yml)
@@ -98,6 +111,9 @@ jobs:
           for values in deploy/helm/rust-microservices/values-*.yaml; do
             echo "== $values"
             helm template rust-microservices deploy/helm/rust-microservices -f "$values" | validate -
+            # With KEDA: ScaledObjects instead of HorizontalPodAutoscalers.
+            helm template rust-microservices deploy/helm/rust-microservices -f "$values" \
+              --api-versions keda.sh/v1alpha1/ScaledObject | validate -
           done
           echo "== deploy/argocd"
           helm template lab-apps deploy/argocd | validate -

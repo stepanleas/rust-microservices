@@ -54,15 +54,30 @@ SKIP_COMPENSATION=${SKIP_COMPENSATION:-0}
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
 
-# Stops or restarts payment in Kubernetes. The HPA leaves a Deployment at 0 replicas alone
-# and scales it back to its minimum once restarted.
+# Stops or restarts payment in Kubernetes. KEDA would scale a Deployment below its minimum back
+# up, so with a ScaledObject the replicas are pinned to 0 (paused) and then handed back to it; a
+# plain HPA leaves a Deployment at 0 replicas alone and scales it back to its minimum once restarted.
 k8s_payment() {
-  local k="kubectl -n $NAMESPACE"
+  local k="kubectl -n $NAMESPACE" keda=""
+  $k get scaledobject/payment >/dev/null 2>&1 && keda=1
   if [[ "$1" == "stop" ]]; then
-    $k scale deploy/payment --replicas=0
+    if [[ -n "$keda" ]]; then
+      $k annotate --overwrite scaledobject/payment autoscaling.keda.sh/paused-replicas=0
+    else
+      $k scale deploy/payment --replicas=0
+    fi
     $k wait --for=delete pod -l app.kubernetes.io/name=payment --timeout=120s
   else
-    $k scale deploy/payment --replicas=1
+    if [[ -n "$keda" ]]; then
+      $k annotate scaledobject/payment autoscaling.keda.sh/paused-replicas-
+      # KEDA restores the minimum replicas on its next reconcile.
+      for _ in $(seq 1 30); do
+        [[ $($k get deploy/payment -o jsonpath='{.spec.replicas}') != 0 ]] && break
+        sleep 2
+      done
+    else
+      $k scale deploy/payment --replicas=1
+    fi
     $k rollout status deploy/payment --timeout=180s
   fi
 }

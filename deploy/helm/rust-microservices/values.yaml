@@ -14,6 +14,9 @@ global:
   tracing:
     endpoint: http://alloy.monitoring:4318
     sampleRatio: "1.0"
+  # KEDA's requests/s triggers (autoscaling.keda.requestsPerSecond) query this Prometheus.
+  autoscaling:
+    prometheusUrl: http://kube-prometheus-stack-prometheus.monitoring:9090
 
 # PodMonitors for the CloudNativePG clusters and Kafka, Kafka's own metrics and the
 # kafka-exporter (consumer lag). The services' ServiceMonitors: `metrics` of each service.
@@ -83,6 +86,14 @@ gateway:
   # Attach the route to an existing Gateway instead of creating `shop`, e.g. the homelab's shared
   # HTTPS Gateway: {name: lab, namespace: envoy-gateway-system, sectionName: https}.
   parentRef: {}
+  # Also route /direct/<service>/... straight to each service (without the api-gateway), to
+  # benchmark the gateway hop.
+  directRoutes: false
+
+# KEDA (deploy/platform/keda) scales every service on CPU, the saga's consumers also on their
+# Kafka consumer lag and the gateway on its requests/s. Without KEDA: a CPU HorizontalPodAutoscaler.
+x-keda: &keda
+  enabled: true
 
 # Shared by the services (templated with `tpl`).
 x-common-env: &common-env
@@ -100,6 +111,8 @@ catalog:
     <<: *common-env
     SERVICE_NAME: catalog_api
   database: {enabled: true, cluster: catalog-db}
+  autoscaling:
+    keda: *keda
 
 customer:
   port: 8082
@@ -107,6 +120,8 @@ customer:
     <<: *common-env
     SERVICE_NAME: customer_api
   database: {enabled: true, cluster: customer-db}
+  autoscaling:
+    keda: *keda
 
 order:
   port: 8081
@@ -115,6 +130,10 @@ order:
     SERVICE_NAME: order_api
     KAFKA_GROUP_ID: order-service-group
   database: {enabled: true, cluster: order-db}
+  autoscaling:
+    keda:
+      <<: *keda
+      kafka: {consumerGroup: order-service-group}
 
 restaurant:
   port: 8083
@@ -122,6 +141,10 @@ restaurant:
     <<: *common-env
     SERVICE_NAME: restaurant_api
   database: {enabled: true, cluster: restaurant-db}
+  autoscaling:
+    keda:
+      <<: *keda
+      kafka: {consumerGroup: restaurant-service-group}
 
 payment:
   port: 8084
@@ -129,6 +152,10 @@ payment:
     <<: *common-env
     SERVICE_NAME: payment_api
   database: {enabled: true, cluster: payment-db}
+  autoscaling:
+    keda:
+      <<: *keda
+      kafka: {consumerGroup: payment-service-group}
 
 api-gateway:
   port: 8070
@@ -146,3 +173,7 @@ api-gateway:
   probes:
     # The gateway has no startup endpoint.
     startupPath: /api/health/live
+  autoscaling:
+    keda:
+      <<: *keda
+      requestsPerSecond: {threshold: 500}

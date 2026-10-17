@@ -393,16 +393,27 @@ deploy/
 │   └── monitoring/              local chart: alert rules, Grafana dashboards, extra scrape targets
 ├── argocd/                      the homelab's Argo CD Applications (app of apps)
 ├── helm/
-│   ├── rust-service/            one service: Deployment, Service, ConfigMap, HPA, PDB, probes,
-│   │                            ServiceMonitor
+│   ├── rust-service/            one service: Deployment, Service, ConfigMap, KEDA ScaledObject
+│   │                            (or HPA), PDB, probes, ServiceMonitor
 │   └── rust-microservices/      umbrella: rust-service aliased per service, CNPG Cluster + Pooler
 │                                per service, Strimzi Kafka (1 KRaft node) + 22 KafkaTopics,
 │                                Gateway + HTTPRoute -> api-gateway; values-kind / values-lab
-└── scripts/                     kind-up / kind-load / kind-deploy / kind-down, seal
+└── scripts/                     kind-up / kind-load / kind-deploy / kind-down, seal, replicas
 ```
 
-* Every service runs 2 replicas (HPA on CPU, 2–3 on kind), with a PodDisruptionBudget,
-  rolling updates without unavailability, and probes on `/api/health/{startup,live,ready}`.
+* Every service runs at least 2 replicas (2–3 on kind, 2–4 on the lab), with a
+  PodDisruptionBudget, rolling updates without unavailability, and probes on
+  `/api/health/{startup,live,ready}`.
+* KEDA scales them: every service on CPU (70%), order, restaurant and payment also on their
+  Kafka consumer lag (one replica per 100 waiting messages, at most one per partition), the
+  api-gateway on its requests/s (one replica per 500). Without KEDA the chart falls back to a CPU
+  HorizontalPodAutoscaler. `make pin_replicas N=3` fixes the replicas of every service (KEDA
+  paused), e.g. for comparable load tests; `make unpin_replicas` hands them back.
+* Envoy balances each request over the api-gateway pods; the gateway reaches the services
+  through their ClusterIP Services, which balance per connection, so it closes idle upstream
+  connections after 30 s (`POOL_IDLE_TIMEOUT_MS`) to spread them over new pods. The *Load
+  balancing* dashboard shows the per-pod skew. `/direct/<service>/...` (kind and lab) reaches a
+  service without the gateway, to measure the gateway hop.
 * Each service has its own Postgres (CloudNativePG `<service>-db`) reached through a PgBouncer
   `Pooler` in session mode; `DATABASE_URL` is assembled from the operator's `<service>-db-app`
   secret. Replicas starting together apply the migrations one at a time (advisory lock in
@@ -449,6 +460,7 @@ troubleshooting: [infra/README.md](infra/README.md).
 | `OTEL_SERVICE_NAME`       | the service's name       | all                        |
 | `MICROSERVICE_<NAME>_URL` | `http://localhost:<port>` | api-gateway (one per service) |
 | `CONNECT_TIMEOUT_MS` / `RESPONSE_TIMEOUT_MS` | `1000` / `10000` | api-gateway |
+| `POOL_IDLE_TIMEOUT_MS` / `POOL_MAX_IDLE_PER_HOST` | `30000` / `32` | api-gateway; closes idle upstream connections so new ones spread over the current pods |
 | `CB_SLIDING_WINDOW_SIZE`, `CB_FAILURE_RATE_THRESHOLD`, `CB_PERMITTED_CALLS_IN_HALF_OPEN`, `CB_WAIT_IN_OPEN_MS` | `10`, `50`, `2`, `10000` | api-gateway |
 
 ### Scaling out
@@ -514,8 +526,22 @@ Loki and Tempo (monolithic, on volumes), and Grafana Alloy on every node shippin
 Loki and the services' spans to Tempo. Grafana links the three: a log line's `trace_id` opens
 the trace, a span opens the logs of every service it touched, and Tempo's span metrics carry
 exemplars back to traces. Dashboards (folder *Shop*): system overview (with the slowest
-requests), service detail, load balancing, saga & Kafka, Postgres. The alert rules live in
-`deploy/platform/monitoring/rules/`.
+requests), service detail, load balancing, saga & Kafka, Postgres, and the live load test. The
+alert rules live in `deploy/platform/monitoring/rules/`.
+
+### Load tests
+
+k6 scenarios from a smoke test to exactly 1,000,000 requests, run from this machine or inside the
+cluster (k6-operator), with a consistency check afterwards and the results on Grafana's *Live load
+test* dashboard:
+
+```bash
+make load_tool load_seed            # once
+make load SCENARIO=mixed            # TARGET=kind (default) | lab
+make load_verify
+```
+
+Scenarios, thresholds, recorded runs and the micro-benchmarks: [load-tests/README.md](load-tests/README.md).
 
 ---
 

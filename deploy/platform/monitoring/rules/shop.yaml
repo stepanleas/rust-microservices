@@ -98,3 +98,26 @@ groups:
         annotations:
           summary: Kafka is not ready
           description: No saga progresses and the outboxes fill up until the broker is back.
+
+  # KEDA (deploy/platform/keda) scales the services: a failing trigger freezes them at their
+  # current replicas, a capped one can't absorb more load.
+  - name: shop-autoscaling
+    rules:
+      - alert: ShopAutoscalerTriggerFailing
+        expr: sum by (scaledObject, scaler) (increase(keda_scaler_errors_total[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.scaledObject }}: the {{ $labels.scaler }} trigger fails"
+          description: KEDA can't read this trigger's metric (Kafka or Prometheus unreachable?), so the service doesn't scale on it. See the keda-operator logs.
+      - alert: ShopAutoscalerAtMaximum
+        expr: |
+          max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_desired_replicas{namespace="shop"})
+            >= max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop"})
+            and max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop"})
+            > max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_min_replicas{namespace="shop"})
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.horizontalpodautoscaler }} wants more replicas than its maximum"
+          description: The service has been at its maximum replicas for 15 minutes; raise autoscaling.maxReplicas or find the bottleneck (Kafka partitions, database).

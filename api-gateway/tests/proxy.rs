@@ -2,7 +2,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use api_gateway::{
     circuit_breaker::CircuitBreakerConfig,
-    config::{RouteConfig, Settings},
+    config::{PoolConfig, RouteConfig, Settings},
 };
 use axum::{Json, Router, extract::Request, routing::any};
 use serde_json::{Value, json};
@@ -43,6 +43,10 @@ async fn spawn_gateway(routes: Vec<RouteConfig>) -> String {
         http_url: "127.0.0.1:0".to_string(),
         connect_timeout: Duration::from_millis(200),
         response_timeout: Duration::from_secs(2),
+        pool: PoolConfig {
+            idle_timeout: Duration::from_secs(30),
+            max_idle_per_host: 32,
+        },
         circuit_breaker: CircuitBreakerConfig {
             sliding_window_size: 2,
             permitted_calls_in_half_open: 1,

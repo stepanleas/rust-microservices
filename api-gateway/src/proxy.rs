@@ -30,6 +30,8 @@ impl ProxyState {
     pub fn new(settings: &Settings) -> anyhow::Result<Arc<Self>> {
         let client = reqwest::Client::builder()
             .connect_timeout(settings.connect_timeout)
+            .pool_idle_timeout(settings.pool.idle_timeout)
+            .pool_max_idle_per_host(settings.pool.max_idle_per_host)
             // The gateway must hand redirects back to the caller, not follow them.
             .redirect(reqwest::redirect::Policy::none())
             .build()?;

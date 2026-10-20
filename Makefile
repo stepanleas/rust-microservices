@@ -188,11 +188,12 @@ lab_ssh:
 	$(lab_vagrant) ssh $(VM)
 
 # Pause/resume the CI runner on the ops VM, e.g. around load tests.
+# The marker file tells the LabCiRunnerOffline alert that the pause is on purpose.
 lab_quiet:
-	$(lab_ansible) ansible ops_vm -b -m ansible.builtin.command -a "docker stop forgejo-runner"
+	$(lab_ansible) ansible ops_vm -b -m ansible.builtin.shell -a "docker stop forgejo-runner && touch /opt/lab/node-exporter/ci-runner-paused"
 
 lab_unquiet:
-	$(lab_ansible) ansible ops_vm -b -m ansible.builtin.command -a "docker start forgejo-runner"
+	$(lab_ansible) ansible ops_vm -b -m ansible.builtin.shell -a "docker start forgejo-runner && rm -f /opt/lab/node-exporter/ci-runner-paused"
 
 lab_snapshot:
 	$(lab_vagrant) snapshot save $(NAME)

@@ -27,7 +27,7 @@ spec:
   podMetricsEndpoints:
     - port: metrics
 ---
-# Kafka: the broker's metrics reporter and the kafka-exporter (both port 9404).
+# Kafka: the broker's metrics reporter (port 9404).
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -38,6 +38,27 @@ spec:
   selector:
     matchLabels:
       strimzi.io/cluster: {{ .Values.kafka.name }}
+    matchExpressions:
+      - {key: strimzi.io/name, operator: NotIn, values: [{{ .Values.kafka.name }}-kafka-exporter]}
   podMetricsEndpoints:
     - port: tcp-prometheus
+---
+# The kafka-exporter (port 9404) asks the broker for every partition's offsets on each scrape:
+# ~10 s on the lab, the default scrape timeout, and a scrape that times out drops the lag series
+# (the lag alert then flaps). Every 30 s with 25 s to answer.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-exporter
+  labels:
+    app.kubernetes.io/part-of: rust-microservices
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: {{ .Values.kafka.name }}
+      strimzi.io/name: {{ .Values.kafka.name }}-kafka-exporter
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      interval: 30s
+      scrapeTimeout: 25s
 {{- end }}

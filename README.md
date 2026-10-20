@@ -1129,7 +1129,7 @@ Rules in `deploy/platform/monitoring/rules/` (plain Prometheus rule files, check
 | `LabDiskAlmostFull` | a root disk is almost full (lab) | warning |
 | `LabOpsVmDown`, `LabOpsServiceDown` | the ops VM or one of its services doesn't answer (lab) | critical / warning |
 | `LabCertificateExpiring` | a lab certificate expires in < 14 days (lab) | warning |
-| `LabCiRunnerOffline` | the Forgejo Actions runner container is not running, 15 min (lab; `make lab_quiet` stops it on purpose) | warning |
+| `LabCiRunnerOffline` | the Forgejo Actions runner container is not running, 15 min (lab; a `make lab_quiet` pause is ignored for 3 h) | warning |
 | `LabArgoAppOutOfSync`, `LabArgoAppDegraded` | an Argo CD application is OutOfSync or Degraded/Missing, 10 min (lab) | warning |
 
 On the lab Alertmanager sends every alert (except `Watchdog` and `InfoInhibitor`) to **ntfy** on

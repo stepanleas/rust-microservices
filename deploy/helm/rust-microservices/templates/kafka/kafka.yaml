@@ -81,9 +81,11 @@ spec:
           - "kafka_log_.*"
           - "kafka_controller_.*"
           - "kafka_coordinator_group_.*"
-  # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics).
+  # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics), without
+  # Kafka's internal topics (__consumer_offsets: 50 partitions nobody alerts on).
   kafkaExporter:
     topicRegex: ".*"
+    topicExcludeRegex: "^__.*"
     groupRegex: ".*"
     {{- end }}
   entityOperator:

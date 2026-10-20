@@ -6,6 +6,10 @@ global:
     registry: registry.lab.internal
     namespace: shop
   environment: lab
+  # One request in ten traced: with every request traced, a 150 req/s load test pushed Tempo past
+  # its 1 GiB memory limit (OOM) on a host already short of CPU.
+  tracing:
+    sampleRatio: "0.1"
 
 kafka:
   storageSize: 5Gi

@@ -1,0 +1,116 @@
+# Rolling Kubernetes upgrade to `kubernetes_version` (group_vars): `make lab_k8s_upgrade VERSION=x.y.z`
+# bumps it and runs this. kubeadm moves one minor version at a time. The control plane goes
+# first, then the workers one by one (drain → upgrade → uncordon), so PDB-protected workloads
+# with 2+ replicas stay available.
+- name: Control plane
+  hosts: control_plane
+  become: true
+  vars:
+    kubectl: kubectl --kubeconfig /etc/kubernetes/admin.conf
+  tasks:
+    - name: Current control plane version
+      ansible.builtin.shell: >-
+        {{ kubectl }} get node {{ inventory_hostname }}
+        -o jsonpath='{.status.nodeInfo.kubeletVersion}'
+      register: cp_version
+      changed_when: false
+
+    - name: Upgrade the control plane node
+      when: cp_version.stdout != 'v' ~ kubernetes_version
+      block:
+        - name: kubeadm {{ kubernetes_version }}
+          ansible.builtin.include_role:
+            name: kube_packages
+          vars:
+            kube_packages_installed: [kubeadm]
+
+        - name: Upgrade config (Cilium replaces kube-proxy, so kubeadm must not add it back)
+          ansible.builtin.copy:
+            dest: /etc/kubernetes/kubeadm-upgrade.yaml
+            content: |
+              apiVersion: kubeadm.k8s.io/v1beta4
+              kind: UpgradeConfiguration
+              apply:
+                kubernetesVersion: v{{ kubernetes_version }}
+                skipPhases:
+                  - addon/kube-proxy
+            mode: "0600"
+
+        - name: kubeadm upgrade apply
+          ansible.builtin.command: kubeadm upgrade apply --config /etc/kubernetes/kubeadm-upgrade.yaml --yes
+          changed_when: true
+
+        - name: Drain
+          ansible.builtin.command: >-
+            {{ kubectl }} drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data --timeout=5m
+          changed_when: true
+
+        - name: kubelet and kubectl {{ kubernetes_version }}
+          ansible.builtin.include_role:
+            name: kube_packages
+
+        - name: Restart kubelet
+          ansible.builtin.systemd_service:
+            name: kubelet
+            state: restarted
+            daemon_reload: true
+
+        - name: Uncordon
+          ansible.builtin.command: "{{ kubectl }} uncordon {{ inventory_hostname }}"
+          changed_when: true
+
+- name: Workers, one at a time
+  hosts: workers
+  become: true
+  serial: 1
+  vars:
+    control_plane: "{{ groups['control_plane'][0] }}"
+    kubectl: kubectl --kubeconfig /etc/kubernetes/admin.conf
+  tasks:
+    - name: Current kubelet version
+      ansible.builtin.shell: >-
+        {{ kubectl }} get node {{ inventory_hostname }}
+        -o jsonpath='{.status.nodeInfo.kubeletVersion}'
+      delegate_to: "{{ control_plane }}"
+      register: worker_version
+      changed_when: false
+
+    - name: Upgrade the worker
+      when: worker_version.stdout != 'v' ~ kubernetes_version
+      block:
+        - name: kubeadm {{ kubernetes_version }}
+          ansible.builtin.include_role:
+            name: kube_packages
+          vars:
+            kube_packages_installed: [kubeadm]
+
+        - name: kubeadm upgrade node
+          ansible.builtin.command: kubeadm upgrade node
+          changed_when: true
+
+        - name: Drain
+          ansible.builtin.command: >-
+            {{ kubectl }} drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data --timeout=10m
+          delegate_to: "{{ control_plane }}"
+          changed_when: true
+
+        - name: kubelet and kubectl {{ kubernetes_version }}
+          ansible.builtin.include_role:
+            name: kube_packages
+
+        - name: Restart kubelet
+          ansible.builtin.systemd_service:
+            name: kubelet
+            state: restarted
+            daemon_reload: true
+
+        - name: Ready again
+          ansible.builtin.command: >-
+            {{ kubectl }} wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=5m
+          delegate_to: "{{ control_plane }}"
+          changed_when: false
+
+        - name: Uncordon
+          ansible.builtin.command: "{{ kubectl }} uncordon {{ inventory_hostname }}"
+          delegate_to: "{{ control_plane }}"
+          changed_when: true

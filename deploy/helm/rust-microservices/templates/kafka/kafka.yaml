@@ -1,0 +1,90 @@
+{{- $kafka := .Values.kafka -}}
+# Single dual-role (controller + broker) KRaft node.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  labels:
+    strimzi.io/cluster: {{ $kafka.name }}
+spec:
+  replicas: 1
+  roles: [controller, broker]
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ $kafka.storageSize }}
+        deleteClaim: true
+        kraftMetadata: shared
+  {{- with $kafka.external.nodeSelector }}
+  {{- if $kafka.external.enabled }}
+  template:
+    pod:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  {{- range $key, $value := . }}
+                  - key: {{ $key }}
+                    operator: In
+                    values: [{{ $value | quote }}]
+                  {{- end }}
+  {{- end }}
+  {{- end }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ $kafka.name }}
+spec:
+  kafka:
+    version: {{ $kafka.version }}
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      {{- if $kafka.external.enabled }}
+      - name: external
+        port: 9094
+        type: nodeport
+        tls: false
+        configuration:
+          externalTrafficPolicy: Local
+          bootstrap:
+            nodePort: {{ $kafka.external.bootstrapNodePort }}
+          brokers:
+            - broker: 0
+              nodePort: {{ $kafka.external.brokerNodePort }}
+              advertisedHost: {{ $kafka.external.advertisedHost }}
+              advertisedPort: {{ $kafka.external.advertisedPort }}
+      {{- end }}
+    config:
+      # Single broker: internal topics cannot be replicated.
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      num.partitions: {{ $kafka.partitions }}
+      group.initial.rebalance.delay.ms: 0
+    {{- if $.Values.metrics.enabled }}
+    # Broker metrics in the Prometheus format on port 9404 (PodMonitor `kafka`).
+    metricsConfig:
+      type: strimziMetricsReporter
+      values:
+        allowList:
+          - "kafka_server_.*"
+          - "kafka_network_.*"
+          - "kafka_log_.*"
+          - "kafka_controller_.*"
+          - "kafka_coordinator_group_.*"
+  # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics).
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    {{- end }}
+  entityOperator:
+    topicOperator: {}

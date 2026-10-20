@@ -1,0 +1,2 @@
+# Decrypts SealedSecrets committed to git (make seal). kubeseal looks for this name by default.
+fullnameOverride: sealed-secrets-controller

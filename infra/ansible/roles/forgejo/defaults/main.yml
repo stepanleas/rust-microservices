@@ -1,0 +1,31 @@
+# Repository variables and secrets for the shared workflows (see .github/workflows/release.yml).
+forgejo_actions_variables:
+  CI_PLATFORM: lab
+  REGISTRY_HOST: "registry.{{ lab_domain }}"
+  IMAGE_NAMESPACE: "{{ forgejo_org }}"
+  # Where the deploy-lab job records the released tags (tasks/lab_env.yml).
+  LAB_ENV_REPO: "{{ forgejo_org }}/{{ forgejo_env_repo }}"
+  # The BuildKit builder of the release job: trust the lab CA (buildx copies the bundle into the
+  # builder container) and pull docker.io base images through the Zot cache.
+  BUILDKITD_CONFIG: |
+    [registry."registry.{{ lab_domain }}"]
+      ca = ["/etc/ssl/certs/ca-certificates.crt"]
+    [registry."mirror.{{ lab_domain }}"]
+      ca = ["/etc/ssl/certs/ca-certificates.crt"]
+    [registry."docker.io"]
+      mirrors = ["mirror.{{ lab_domain }}"]
+forgejo_actions_secrets:
+  DOCKER_USERNAME: "{{ registry_ci_user }}"
+  DOCKER_PASSWORD: "{{ vault_registry_ci_password }}"
+forgejo_secrets_hash: "{{ forgejo_actions_secrets | to_json | hash('sha256') }}"
+forgejo_secrets_hash_file: "{{ lab_dir }}/forgejo-secrets.sha256"
+
+forgejo_host_token_name: lab-host
+forgejo_host_token_file: "{{ lab_dir }}/forgejo-token"
+
+# Deploy state for Argo CD and the user that writes it (tasks/lab_env.yml).
+forgejo_deploy_user: lab-deploy
+forgejo_deploy_token_secret: LAB_DEPLOY_TOKEN
+forgejo_env_images_header: |
+  # Image tags running on the lab, written by the deploy-lab job of release.yml in
+  # shop/rust-microservices. Argo CD layers this file over values-lab.yaml.

@@ -1,0 +1,21 @@
+# Overlay for running several replicas of the saga services on images built from this checkout
+# (`make scale_up`, then `make e2e_scaled`). Scaled services lose their fixed container name and
+# host port; reach them through the api-gateway (http://localhost:8070/shop/<service>/...), which
+# resolves the service name to every replica.
+services:
+  catalog:
+    image: artellas/rust-catalog:${TAG:-local}
+  customer:
+    image: artellas/rust-customer:${TAG:-local}
+  payment:
+    image: artellas/rust-payment:${TAG:-local}
+  api-gateway:
+    image: artellas/rust-api-gateway:${TAG:-local}
+  order:
+    image: artellas/rust-order:${TAG:-local}
+    container_name: !reset null
+    ports: !reset []
+  restaurant:
+    image: artellas/rust-restaurant:${TAG:-local}
+    container_name: !reset null
+    ports: !reset []

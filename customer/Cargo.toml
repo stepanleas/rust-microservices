@@ -28,10 +28,9 @@ serde_json = "1.0.151"
 diesel = { version = "2.3.13", features = ["postgres", "r2d2", "uuid", "chrono"] }
 diesel_migrations = "2.3.2"
 
-# Logging
+# Logging and metrics
 tracing = "0.1.44"
-tracing-actix-web = "0.7.22"
-env_logger = "0.11.11"
+metrics = "0.24.6"
 
 # Configuration
 dotenv = "0.15.0"

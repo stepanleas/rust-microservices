@@ -64,6 +64,8 @@ diesel::table! {
         attempts -> Int4,
         created_at -> Timestamp,
         processed_at -> Nullable<Timestamp>,
+        #[max_length = 128]
+        trace_context -> Nullable<Varchar>,
     }
 }
 

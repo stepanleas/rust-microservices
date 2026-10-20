@@ -1,0 +1,7 @@
+# DNS, registry, git forge + CI runner, notifications, metrics and logs for the cluster's
+# Prometheus and Loki. Caddy starts before the services behind it
+# (it resolves them per request), so the Forgejo setup can go through https://git.lab.internal.
+- name: Ops VM
+  hosts: ops_vm
+  become: true
+  roles: [dnsmasq, docker, caddy, zot, ntfy, node_exporter, alloy, forgejo, forgejo_runner]

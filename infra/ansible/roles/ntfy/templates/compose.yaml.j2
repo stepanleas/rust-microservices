@@ -1,0 +1,18 @@
+# Managed by Ansible (ntfy role).
+services:
+  ntfy:
+    image: {{ ntfy_image }}
+    container_name: ntfy
+    restart: unless-stopped
+    command: ["serve"]
+    environment:
+      NTFY_BASE_URL: https://ntfy.{{ lab_domain }}
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      NTFY_ENABLE_METRICS: "true"
+    volumes:
+      - ./cache:/var/cache/ntfy
+networks:
+  default:
+    name: lab
+    external: true

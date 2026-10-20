@@ -1,0 +1,8 @@
+apiVersion: v2
+name: monitoring
+description: >-
+  What Prometheus and Grafana watch beyond Kubernetes itself: the alert rules of the shop and
+  the lab (rules/), the Grafana dashboards (dashboards/<folder>/), the Envoy proxies and, on the
+  homelab, the ops VM's exporters. Needs the kube-prometheus-stack CRDs.
+type: application
+version: 0.1.0

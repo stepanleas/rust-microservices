@@ -1,0 +1,28 @@
+# The shop: chart and values-lab.yaml from the followed branch, image tags from the lab-env
+# repository, which the release workflow's deploy-lab job bumps.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rust-microservices
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shop
+  sources:
+    - repoURL: {{ .Values.repoURL }}
+      targetRevision: {{ .Values.revision }}
+      path: deploy/helm/rust-microservices
+      helm:
+        releaseName: rust-microservices
+        valueFiles:
+          - values-lab.yaml
+          - $env/images.yaml
+    - repoURL: {{ .Values.envRepoURL }}
+      targetRevision: main
+      ref: env
+  syncPolicy:
+    {{- include "lab-apps.syncPolicy" . | nindent 4 }}

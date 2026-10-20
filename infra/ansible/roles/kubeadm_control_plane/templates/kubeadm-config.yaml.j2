@@ -1,0 +1,52 @@
+# Managed by Ansible (kubeadm_control_plane role). Read by `kubeadm init` only: later changes go
+# through `kubeadm upgrade` or by editing the kubeadm-config ConfigMap.
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ lab_ip }}
+  bindPort: 6443
+nodeRegistration:
+  name: {{ inventory_hostname }}
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    # The VMs also have a NAT interface: pin the node to its lab IP.
+    - name: node-ip
+      value: {{ lab_ip }}
+# Cilium replaces kube-proxy.
+skipPhases:
+  - addon/kube-proxy
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v{{ kubernetes_version }}
+clusterName: lab
+controlPlaneEndpoint: k8s-cp.{{ lab_domain }}:6443
+networking:
+  podSubnet: {{ kubernetes_pod_subnet }}
+  serviceSubnet: {{ kubernetes_service_subnet }}
+apiServer:
+  certSANs:
+    - k8s-cp.{{ lab_domain }}
+    - {{ lab_ip }}
+# Metrics endpoints reachable from Prometheus in the cluster (Phase 5).
+controllerManager:
+  extraArgs:
+    - name: bind-address
+      value: 0.0.0.0
+scheduler:
+  extraArgs:
+    - name: bind-address
+      value: 0.0.0.0
+etcd:
+  local:
+    extraArgs:
+      - name: listen-metrics-urls
+        value: http://0.0.0.0:2381
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+# Kubelet serving certificates signed by the cluster CA (approved by kubelet-csr-approver), so
+# metrics-server and Prometheus verify the kubelets instead of skipping TLS checks.
+serverTLSBootstrap: true
+resolvConf: /etc/kubernetes/resolv.conf

@@ -4,6 +4,13 @@ name: release
 #   git tag order-v1.4.0 && git push origin order-v1.4.0
 # which publishes artellas/rust-order:1.4.0, :1.4, :1 and :latest.
 # Existing tags can be (re)released from Actions -> release -> Run workflow.
+#
+# The same file runs on the lab's Forgejo (git push lab order-v1.4.0). Repository variables set by
+# the Ansible forgejo role switch it over; on GitHub they are unset and the defaults apply:
+#   CI_PLATFORM      lab                    -> registry build cache, and the deploy-lab job runs
+#   REGISTRY_HOST    registry.lab.internal  -> push there instead of Docker Hub
+#   IMAGE_NAMESPACE  shop                   -> instead of artellas
+#   BUILDKITD_CONFIG buildkitd.toml for the builder, e.g. to trust the lab CA
 on:
   push:
     tags:
@@ -76,7 +83,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: artellas/rust-${{ steps.tag.outputs.service }}
+          images: ${{ vars.REGISTRY_HOST && format('{0}/', vars.REGISTRY_HOST) || '' }}${{ vars.IMAGE_NAMESPACE || 'artellas' }}/rust-${{ steps.tag.outputs.service }}
           tags: |
             type=semver,pattern={{version}},value=${{ steps.tag.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag.outputs.version }}
@@ -84,10 +91,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: ${{ vars.BUILDKITD_CONFIG }}
 
+      # An empty registry means Docker Hub.
       - name: Login to Docker
         uses: docker/login-action@v3
         with:
+          registry: ${{ vars.REGISTRY_HOST }}
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
@@ -101,8 +112,52 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ steps.tag.outputs.service }}
-          cache-to: type=gha,mode=max,scope=${{ steps.tag.outputs.service }}
+          cache-from: ${{ vars.CI_PLATFORM == 'lab' && format('type=registry,ref={0}/cache/rust-{1}', vars.REGISTRY_HOST, steps.tag.outputs.service) || format('type=gha,scope={0}', steps.tag.outputs.service) }}
+          cache-to: ${{ vars.CI_PLATFORM == 'lab' && format('type=registry,ref={0}/cache/rust-{1},mode=max', vars.REGISTRY_HOST, steps.tag.outputs.service) || format('type=gha,mode=max,scope={0}', steps.tag.outputs.service) }}
 
       - name: Image digest
         run: echo "${{ steps.docker_build.outputs.digest }}"
+
+  # Lab only: records the released versions in images.yaml of the repository LAB_ENV_REPO, which
+  # Argo CD deploys from (deploy/argocd/templates/rust-microservices.yaml). The bump never touches
+  # this repository, so main stays identical on GitHub and the lab. LAB_DEPLOY_TOKEN belongs to a
+  # user that can only write to LAB_ENV_REPO.
+  deploy-lab:
+    needs: [tags, release]
+    if: vars.CI_PLATFORM == 'lab'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-lab
+      cancel-in-progress: false
+    steps:
+      - name: Bump the image tags
+        env:
+          TAGS: ${{ needs.tags.outputs.tags }}
+          REPO: ${{ vars.LAB_ENV_REPO }}
+          TOKEN: ${{ secrets.LAB_DEPLOY_TOKEN }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          # The token goes in a header per command, so it is never written to .git/config.
+          auth="Authorization: Basic $(printf 'lab-deploy:%s' "$TOKEN" | base64 -w0)"
+          git -c http.extraHeader="$auth" clone --depth 1 "$SERVER/$REPO.git" env
+          cd env
+          git config user.name "lab-deploy"
+          git config user.email "lab-deploy@users.noreply"
+          for attempt in 1 2 3; do
+            for tag in $(echo "$TAGS" | jq -r '.[]'); do
+              service=${tag%-v*}; version=${tag##*-v}
+              line="$service: {image: {tag: \"$version\"}}"
+              if grep -q "^$service:" images.yaml; then
+                sed -i "s|^$service:.*|$line|" images.yaml
+              else
+                echo "$line" >> images.yaml
+              fi
+            done
+            git add images.yaml
+            git diff --cached --quiet && { echo "Already deployed"; exit 0; }
+            git commit -qm "Deploy $(echo "$TAGS" | jq -r 'join(", ")')"
+            git -c http.extraHeader="$auth" push origin HEAD && exit 0
+            # Another release pushed first: start again from its commit.
+            git -c http.extraHeader="$auth" fetch --depth 1 origin && git reset -q --hard FETCH_HEAD
+          done
+          exit 1

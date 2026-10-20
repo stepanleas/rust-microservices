@@ -71,6 +71,12 @@ impl ApproveOrder {
         let message = restaurant_approval_response(&approval)?;
         self.approval_repository
             .save_with_outbox(&approval, &updated_products, &message)?;
+        let decision = if approval.is_approved() {
+            "approved"
+        } else {
+            "rejected"
+        };
+        metrics::counter!("restaurant_order_approvals_total", "decision" => decision).increment(1);
 
         tracing::info!(
             "Order {} {} by restaurant (saga {})",

@@ -1,0 +1,18 @@
+# Push notifications on the LAN: Alertmanager's webhook target (Phase 5).
+- name: Directories
+  ansible.builtin.file:
+    path: "/opt/lab/ntfy/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["", cache]
+
+- name: Compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /opt/lab/ntfy/compose.yaml
+    mode: "0644"
+
+- name: Running
+  community.docker.docker_compose_v2:
+    project_src: /opt/lab/ntfy
+    state: present

@@ -1,0 +1,4 @@
+# Argo CD and the root Application (also part of site.yml). make lab_bootstrap [REVISION=<branch>]
+- name: GitOps
+  hosts: localhost
+  roles: [argocd]

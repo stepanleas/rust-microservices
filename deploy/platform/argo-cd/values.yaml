@@ -1,0 +1,65 @@
+# Argo CD on the homelab. The bootstrap playbook (infra/ansible/playbooks/bootstrap.yml) installs
+# this release once with these values; from then on Argo CD manages itself from git.
+global:
+  domain: argocd.lab.internal
+
+configs:
+  params:
+    # TLS ends at the lab Gateway (deploy/platform/envoy-gateway/lab/gateway.yaml).
+    server.insecure: true
+    # Diff against what the API server would store (defaults, CRD conversions) instead of the raw
+    # manifests: no OutOfSync for fields the API server fills in.
+    controller.diff.server.side: true
+  cm:
+    # How often git is polled for changes (default 3 minutes).
+    timeout.reconciliation: 60s
+    # Health of Applications, so the sync waves of the app of apps (deploy/argocd) wait for each
+    # wave to be healthy, not just created (the upstream recipe; off by default since 1.8).
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil and obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+      return hs
+  tls:
+    # argocd-tls-certs-cm holds the lab CA so git.lab.internal is trusted. The CA is generated per
+    # lab and not in git, so the bootstrap playbook writes this ConfigMap.
+    create: false
+
+server:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}
+  httproute:
+    enabled: true
+    hostnames: [argocd.lab.internal]
+    parentRefs:
+      - name: lab
+        namespace: envoy-gateway-system
+        sectionName: https
+
+dex:
+  enabled: false
+notifications:
+  enabled: false
+
+# The redis-secret-init Helm hook creates the Redis password on the first install. Once Argo CD
+# manages itself it would wait for that hook forever; the secret already exists by then.
+redisSecretInit:
+  enabled: false
+
+# Metrics for Prometheus (also server.metrics above): application sync/health (argocd_app_info)
+# and git activity. The ServiceMonitors are only rendered once kube-prometheus-stack's CRD exists.
+controller:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}
+repoServer:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}

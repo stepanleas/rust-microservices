@@ -1,0 +1,8 @@
+apiVersion: v2
+name: lab-apps
+description: >-
+  The homelab's Argo CD Applications (app of apps): one per platform chart of
+  deploy/platform/charts.yaml, the lab-only manifests (deploy/platform/*/lab/), and the shop.
+  The root Application that renders this chart is created by infra/ansible/playbooks/bootstrap.yml.
+type: application
+version: 0.1.0

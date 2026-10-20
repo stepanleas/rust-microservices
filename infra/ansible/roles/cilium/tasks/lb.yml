@@ -1,0 +1,23 @@
+# The LoadBalancer IP pool and where to announce it. They stay here rather than in git: the
+# interface name comes from the VM facts and the range from infra/lab.yml.
+- name: LoadBalancer IP pool and L2 announcement policy
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    definition:
+      - apiVersion: cilium.io/v2
+        kind: CiliumLoadBalancerIPPool
+        metadata:
+          name: lab
+        spec:
+          blocks:
+            - start: "{{ lab.network.lb_pool_start }}"
+              stop: "{{ lab.network.lb_pool_stop }}"
+      - apiVersion: cilium.io/v2alpha1
+        kind: CiliumL2AnnouncementPolicy
+        metadata:
+          name: lab
+        spec:
+          # Only the lab network: announcing on the NAT interface would leak into libvirt's NAT.
+          interfaces: ["^{{ hostvars[groups['control_plane'][0]].lab_iface }}$"]
+          loadBalancerIPs: true
+          externalIPs: true

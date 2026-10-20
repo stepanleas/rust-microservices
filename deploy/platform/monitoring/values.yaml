@@ -1,0 +1,4 @@
+# Lab-only parts (values-lab.yaml): the ops VM's scrape targets and the infrastructure rules and
+# dashboards.
+lab:
+  enabled: false

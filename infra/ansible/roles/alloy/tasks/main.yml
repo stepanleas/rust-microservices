@@ -1,0 +1,28 @@
+# Logs of the ops VM (journald and the Docker containers: Forgejo, Zot, Caddy, the CI runner, ...)
+# into the cluster's Loki, next to the pods' logs. Pushes through the lab Gateway
+# (https://loki.lab.internal, deploy/platform/monitoring), so it only ships once the cluster runs;
+# until then Alloy retries and keeps its read positions.
+- name: Directories
+  ansible.builtin.file:
+    path: "/opt/lab/alloy/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["", data]
+
+- name: Configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /opt/lab/alloy/config.alloy
+    mode: "0644"
+  notify: Restart Alloy
+
+- name: Compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /opt/lab/alloy/compose.yaml
+    mode: "0644"
+
+- name: Running
+  community.docker.docker_compose_v2:
+    project_src: /opt/lab/alloy
+    state: present

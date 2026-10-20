@@ -1,0 +1,21 @@
+dependencies:
+- name: rust-service
+  repository: file://../rust-service
+  version: 0.1.0
+- name: rust-service
+  repository: file://../rust-service
+  version: 0.1.0
+- name: rust-service
+  repository: file://../rust-service
+  version: 0.1.0
+- name: rust-service
+  repository: file://../rust-service
+  version: 0.1.0
+- name: rust-service
+  repository: file://../rust-service
+  version: 0.1.0
+- name: rust-service
+  repository: file://../rust-service
+  version: 0.1.0
+digest: sha256:d8016f3160eb8d581837a1cfc82272bbf29f2ba45c34f9d6bd02584842648ae2
+generated: "2026-10-10T14:39:29.694464805+03:00"

@@ -1,0 +1,42 @@
+# containerd → kube packages → kubeadm init → join workers → Cilium → LoadBalancer pool.
+# Workers join before the CNI exists (they stay NotReady until Cilium runs on them), so that
+# Cilium's own Deployments (Hubble), which don't tolerate the control-plane taint, can schedule.
+- name: Lab facts
+  hosts: kubernetes
+  gather_facts: true
+  tasks:
+    - name: Lab interface
+      ansible.builtin.import_role:
+        name: common
+        tasks_from: facts
+
+- name: Container runtime and Kubernetes packages
+  hosts: kubernetes
+  become: true
+  roles: [containerd, kube_packages]
+
+- name: Control plane
+  hosts: control_plane
+  become: true
+  roles: [kubeadm_control_plane]
+
+- name: Workers
+  hosts: workers
+  become: true
+  roles: [kubeadm_worker]
+
+- name: kubeconfig, CNI and CSR approval
+  hosts: localhost
+  roles: [lab_kubeconfig, cilium]
+
+- name: Cluster ready
+  hosts: localhost
+  tasks:
+    - name: Nodes Ready
+      ansible.builtin.command: kubectl --kubeconfig {{ lab_kubeconfig }} wait --for=condition=Ready nodes --all --timeout=5m
+      changed_when: false
+
+    - name: LoadBalancer IPs
+      ansible.builtin.import_role:
+        name: cilium
+        tasks_from: lb

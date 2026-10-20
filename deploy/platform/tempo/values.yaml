@@ -1,0 +1,31 @@
+# Tempo, monolithic, traces on its own volume. Alloy forwards the services' OTLP spans here.
+tempo:
+  retention: 72h
+  reportingEnabled: false
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  # Span metrics (request rate/latency per service and span, with trace exemplars) and the
+  # service graph, written to Prometheus: the "Service graph" and RED views in Grafana's Tempo
+  # datasource, and links from a latency spike to example traces.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring:9090/api/v1/write
+  overrides:
+    defaults:
+      metrics_generator:
+        processors: [service-graphs, span-metrics]
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+serviceMonitor:
+  enabled: true

@@ -1,0 +1,27 @@
+# Managed by Ansible (forgejo role).
+services:
+  forgejo:
+    image: {{ forgejo_image }}
+    container_name: forgejo
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      FORGEJO__server__DOMAIN: git.{{ lab_domain }}
+      FORGEJO__server__ROOT_URL: https://git.{{ lab_domain }}/
+      FORGEJO__server__SSH_DOMAIN: git.{{ lab_domain }}
+      FORGEJO__server__SSH_PORT: "2222"
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__actions__ENABLED: "true"
+      # `uses: actions/checkout@v4` resolves on GitHub, as it does in GitHub Actions.
+      FORGEJO__actions__DEFAULT_ACTIONS_URL: https://github.com
+      FORGEJO__metrics__ENABLED: "true"
+    ports: ["2222:22"]
+    volumes:
+      - ./data:/data
+networks:
+  default:
+    name: lab
+    external: true

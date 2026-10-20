@@ -1,0 +1,15 @@
+# Managed by Ansible (caddy role).
+services:
+  caddy:
+    image: {{ caddy_image }}
+    container_name: caddy
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - ./data:/data
+networks:
+  default:
+    name: lab
+    external: true

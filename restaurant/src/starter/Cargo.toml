@@ -4,15 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-env_logger.workspace = true
 actix-web.workspace = true
 anyhow.workspace = true
 dotenv.workspace = true
 utoipa-actix-web.workspace = true
 utoipa-swagger-ui.workspace = true
 tracing.workspace = true
-tracing-actix-web.workspace = true
-shared = { workspace = true, features = ["db", "kafka", "outbox", "web"] }
+shared = { workspace = true, features = ["db", "kafka", "outbox", "web", "observability"] }
 
 application = { path = "../application" }
 presentation = { path = "../presentation" }
@@ -23,7 +21,6 @@ messaging = { path = "../messaging" }
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
 tokio.workspace = true
-kafka.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 rust_decimal.workspace = true

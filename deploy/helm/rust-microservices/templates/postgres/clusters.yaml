@@ -1,0 +1,35 @@
+{{- range $service := .Values.postgres.clusters }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $service }}-db
+  labels:
+    app.kubernetes.io/part-of: rust-microservices
+spec:
+  instances: {{ $.Values.postgres.instances }}
+  storage:
+    size: {{ $.Values.postgres.storageSize }}
+  # Creates database `app` owned by user `app`; credentials in secret `{{ $service }}-db-app`.
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: {{ $service }}-db-pooler
+  labels:
+    app.kubernetes.io/part-of: rust-microservices
+spec:
+  cluster:
+    name: {{ $service }}-db
+  instances: {{ $.Values.postgres.pooler.instances }}
+  type: rw
+  pgbouncer:
+    poolMode: {{ $.Values.postgres.pooler.poolMode }}
+    parameters:
+      max_client_conn: {{ $.Values.postgres.pooler.maxClientConnections | quote }}
+      default_pool_size: {{ $.Values.postgres.pooler.defaultPoolSize | quote }}
+{{- end }}

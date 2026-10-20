@@ -1,0 +1,47 @@
+# Runs on the Ansible host: ~/.kube/lab.yaml with context `lab`, merged into ~/.kube/config
+# (a backup of the previous file is kept as ~/.kube/config.before-lab).
+- name: kubeconfig directory
+  ansible.builtin.file:
+    path: "{{ lab_kubeconfig | dirname }}"
+    state: directory
+    mode: "0700"
+
+- name: ~/.kube/lab.yaml
+  ansible.builtin.copy:
+    dest: "{{ lab_kubeconfig }}"
+    content: "{{ kubeconfig | to_nice_yaml }}"
+    mode: "0600"
+  vars:
+    admin: "{{ hostvars[groups['control_plane'][0]].kubeadm_admin_conf.content | b64decode | from_yaml }}"
+    kubeconfig:
+      apiVersion: v1
+      kind: Config
+      clusters:
+        - name: lab
+          cluster: "{{ admin.clusters[0].cluster }}"
+      users:
+        - name: lab-admin
+          user: "{{ admin.users[0].user }}"
+      contexts:
+        - name: lab
+          context: {cluster: lab, user: lab-admin, namespace: default}
+      current-context: lab
+  register: lab_kubeconfig_file
+
+- name: Merge into ~/.kube/config  # noqa: no-handler
+  ansible.builtin.shell: |
+    set -euo pipefail
+    config="$HOME/.kube/config"
+    touch "$config"
+    cp "$config" "$config.before-lab"
+    for kind in context cluster user; do
+      name=$([ "$kind" = user ] && echo lab-admin || echo lab)
+      kubectl --kubeconfig "$config" config "delete-$kind" "$name" >/dev/null 2>&1 || true
+    done
+    KUBECONFIG="$config:{{ lab_kubeconfig }}" kubectl config view --flatten > "$config.new"
+    chmod 600 "$config.new"
+    mv "$config.new" "$config"
+  args:
+    executable: /bin/bash
+  when: lab_kubeconfig_file.changed
+  changed_when: true

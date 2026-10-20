@@ -1,0 +1,36 @@
+# Creates the empty lab VMs described in lab.yml; Ansible configures them (make lab_up).
+# libvirt only: `vagrant up --provider=libvirt` is the default through VAGRANT_DEFAULT_PROVIDER.
+require "ipaddr"
+require "yaml"
+
+lab = YAML.load_file(File.join(__dir__, "lab.yml"))
+network = lab.fetch("network")
+netmask = IPAddr.new("255.255.255.255").mask(Integer(network.fetch("cidr").split("/").last)).to_s
+
+Vagrant.configure("2") do |config|
+  config.vm.box = lab.dig("box", "name")
+  config.vm.box_version = lab.dig("box", "version")
+  # No shared folder: NFS would need sudo on every `vagrant up`, and Ansible copies what it needs.
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  lab.fetch("vms").each do |vm|
+    config.vm.define vm.fetch("name") do |node|
+      node.vm.hostname = vm.fetch("name")
+      node.vm.network :private_network,
+        ip: vm.fetch("ip"),
+        netmask: netmask,
+        libvirt__network_name: network.fetch("name"),
+        libvirt__forward_mode: "none",
+        libvirt__dhcp_enabled: false
+
+      node.vm.provider :libvirt do |libvirt|
+        libvirt.uri = "qemu:///system"
+        libvirt.cpus = vm.fetch("cpus")
+        libvirt.memory = vm.fetch("memory")
+        libvirt.machine_virtual_size = vm.fetch("disk")
+        # Disks are thin-provisioned qcow2: the sizes are maximums, not reserved space.
+        libvirt.cpu_mode = "host-passthrough"
+      end
+    end
+  end
+end

@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-const OK_STATUS: &str = "Ok";
-
 #[readonly::make]
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct AppInfoResponse {
@@ -27,26 +25,6 @@ impl AppInfoResponse {
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct AppInfoDataResponse {
     pub data: AppInfoResponse,
-}
-
-#[readonly::make]
-#[derive(Default, Serialize, Deserialize, ToSchema)]
-pub struct HealthCheckResponse {
-    #[schema(example = "Ok")]
-    pub status: String,
-}
-
-impl HealthCheckResponse {
-    pub fn new() -> Self {
-        Self {
-            status: OK_STATUS.to_string(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, ToSchema)]
-pub struct HealthCheckDataResponse {
-    pub data: HealthCheckResponse,
 }
 
 /// Restaurant decision for an order, produced while handling the order saga.

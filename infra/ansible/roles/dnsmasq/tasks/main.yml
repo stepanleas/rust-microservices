@@ -1,0 +1,25 @@
+# DNS for lab.internal. The config goes in before the package: dnsmasq's default config binds
+# 0.0.0.0:53, which collides with systemd-resolved's stub listener and fails the install.
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/dnsmasq.d
+    state: directory
+    mode: "0755"
+
+- name: Lab zone
+  ansible.builtin.template:
+    src: lab.conf.j2
+    dest: /etc/dnsmasq.d/lab.conf
+    mode: "0644"
+  notify: Restart dnsmasq
+
+- name: Package
+  ansible.builtin.apt:
+    name: dnsmasq
+    lock_timeout: 300
+
+- name: Running
+  ansible.builtin.service:
+    name: dnsmasq
+    state: started
+    enabled: true

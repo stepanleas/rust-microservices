@@ -1,0 +1,27 @@
+# Rendered by load-tests/scripts/run-k8s.sh (envsubst). PARALLELISM runners split the scenario's
+# arrival rates and iterations between them (k6 execution segments); the script is a `k6 archive`
+# of the scenario with its lib/ in the ConfigMap ${NAME}.
+apiVersion: k6.io/v1alpha1
+kind: TestRun
+metadata:
+  name: ${NAME}
+  namespace: ${K6_NAMESPACE}
+spec:
+  parallelism: ${PARALLELISM}
+  script:
+    configMap:
+      name: ${NAME}
+      file: archive.tar
+  arguments: ${ARGUMENTS}
+  runner:
+    image: grafana/k6:${K6_IMAGE_TAG}
+    # The load generator stays off the workers that run the services (RUNNER_NODE=any: anywhere).
+    nodeSelector: ${NODE_SELECTOR}
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+    resources:
+      requests: {cpu: 500m, memory: 256Mi}
+      limits: {memory: 1Gi}
+    env: ${RUNNER_ENV}

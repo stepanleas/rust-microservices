@@ -1,0 +1,30 @@
+# kind cluster for the inner loop: 1 control plane + 2 workers.
+# deploy/scripts/kind-up.sh substitutes the host ports (KIND_HTTP_PORT, KIND_KAFKA_PORT,
+# KIND_KAFKA_BROKER_PORT) and the node image from deploy/platform/versions.yaml.
+#
+# The host ports are mapped to the first worker, labelled ingress-ready=true. Everything exposed
+# on a NodePort (Envoy Gateway, Kafka's external listener) runs on that node with
+# externalTrafficPolicy: Local: a NodePort hop from one kind node to a pod on another is not
+# reliable on every host.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: rust-microservices
+nodes:
+  - role: control-plane
+    image: ${KIND_NODE_IMAGE}
+  - role: worker
+    image: ${KIND_NODE_IMAGE}
+    labels:
+      ingress-ready: "true"
+    extraPortMappings:
+      # Envoy Gateway (HTTP) -> http://localhost:${KIND_HTTP_PORT}
+      - containerPort: 30080
+        hostPort: ${KIND_HTTP_PORT}
+      # Kafka external listener (bootstrap + broker 0), for tools on the host such as the
+      # e2e script's fail_payment helper -> localhost:${KIND_KAFKA_PORT}
+      - containerPort: 30093
+        hostPort: ${KIND_KAFKA_PORT}
+      - containerPort: 30094
+        hostPort: ${KIND_KAFKA_BROKER_PORT}
+  - role: worker
+    image: ${KIND_NODE_IMAGE}

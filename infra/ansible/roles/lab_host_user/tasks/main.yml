@@ -1,0 +1,33 @@
+# The same machine, as the user: the vagrant-libvirt plugin and browser trust in the lab CA.
+- name: Installed Vagrant plugins
+  ansible.builtin.command: vagrant plugin list
+  register: vagrant_plugins
+  changed_when: false
+
+- name: vagrant-libvirt plugin
+  ansible.builtin.command: vagrant plugin install vagrant-libvirt --plugin-version {{ vagrant_libvirt_version }}
+  when: ('vagrant-libvirt (' ~ vagrant_libvirt_version) not in vagrant_plugins.stdout
+  changed_when: true
+
+# Chrome/Chromium read ~/.pki/nssdb; each Firefox profile (deb or snap) has its own cert9.db.
+- name: Browser certificate databases
+  ansible.builtin.shell: |
+    ls -d "$HOME/.pki/nssdb" 2>/dev/null
+    find "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox" \
+      -maxdepth 2 -name cert9.db -printf '%h\n' 2>/dev/null
+  register: nss_dbs
+  changed_when: false
+  failed_when: false
+
+- name: Trust the lab CA in the browsers
+  ansible.builtin.shell: |
+    if certutil -d "sql:{{ item }}" -L -n "{{ nss_name }}" >/dev/null 2>&1; then
+      exit 0
+    fi
+    certutil -d "sql:{{ item }}" -A -t "C,," -n "{{ nss_name }}" -i "{{ lab_ca_dir }}/ca.crt"
+    echo changed
+  loop: "{{ nss_dbs.stdout_lines }}"
+  vars:
+    nss_name: rust-microservices lab CA
+  register: nss_trust
+  changed_when: "'changed' in nss_trust.stdout"

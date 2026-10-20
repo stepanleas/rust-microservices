@@ -1,0 +1,73 @@
+# Git forge + Actions: admin user, org and the (empty) repository the lab pushes to.
+- name: Directories
+  ansible.builtin.file:
+    path: /opt/lab/forgejo/data
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+
+- name: Compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /opt/lab/forgejo/compose.yaml
+    mode: "0644"
+
+- name: Running
+  community.docker.docker_compose_v2:
+    project_src: /opt/lab/forgejo
+    state: present
+
+- name: Wait until Forgejo answers through Caddy
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/healthz"
+  register: forgejo_health
+  until: forgejo_health.status == 200
+  retries: 30
+  delay: 5
+
+- name: Existing admins
+  ansible.builtin.command: docker exec -u git forgejo forgejo admin user list --admin
+  register: forgejo_admins
+  changed_when: false
+
+- name: Admin user
+  ansible.builtin.command: >-
+    docker exec -u git forgejo forgejo admin user create --admin
+    --username {{ forgejo_admin_user }} --email {{ forgejo_admin_user }}@{{ lab_domain }}
+    --password {{ vault_forgejo_admin_password | quote }} --must-change-password=false
+  when: forgejo_admin_user not in forgejo_admins.stdout
+  no_log: true
+  changed_when: true
+
+- name: Organization
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/orgs"
+    method: POST
+    body_format: json
+    body: {username: "{{ forgejo_org }}", visibility: public}
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 422]
+  register: forgejo_org_result
+  changed_when: forgejo_org_result.status == 201
+
+- name: Repository
+  ansible.builtin.uri:
+    url: "{{ forgejo_url }}/api/v1/orgs/{{ forgejo_org }}/repos"
+    method: POST
+    body_format: json
+    body: {name: "{{ forgejo_repo }}", default_branch: main}
+    url_username: "{{ forgejo_admin_user }}"
+    url_password: "{{ vault_forgejo_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 409]
+  register: forgejo_repo_result
+  changed_when: forgejo_repo_result.status == 201
+
+- name: Actions settings
+  ansible.builtin.import_tasks: actions.yml
+
+- name: Deploy repository
+  ansible.builtin.import_tasks: lab_env.yml

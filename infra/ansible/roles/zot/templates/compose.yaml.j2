@@ -1,0 +1,23 @@
+# Managed by Ansible (zot role).
+services:
+  zot:
+    image: {{ zot_image }}
+    container_name: zot
+    restart: unless-stopped
+    command: ["serve", "/etc/zot/config.json"]
+    volumes:
+      - ./registry.json:/etc/zot/config.json:ro
+      - ./htpasswd:/etc/zot/htpasswd:ro
+      - ./registry:/var/lib/registry
+  zot-mirror:
+    image: {{ zot_image }}
+    container_name: zot-mirror
+    restart: unless-stopped
+    command: ["serve", "/etc/zot/config.json"]
+    volumes:
+      - ./mirror.json:/etc/zot/config.json:ro
+      - ./mirror:/var/lib/registry
+networks:
+  default:
+    name: lab
+    external: true

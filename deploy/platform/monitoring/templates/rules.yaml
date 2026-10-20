@@ -1,0 +1,13 @@
+{{- /* rules/<name>.yaml are plain Prometheus rule files (`promtool check rules` works on them). */}}
+{{- range $path, $_ := .Files.Glob "rules/*.yaml" }}
+{{- $name := base $path | trimSuffix ".yaml" }}
+{{- if or (ne $name "infrastructure") $.Values.lab.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}
+spec:
+{{ $.Files.Get $path | indent 2 }}
+{{- end }}
+{{- end }}

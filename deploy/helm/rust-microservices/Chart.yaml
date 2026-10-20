@@ -1,0 +1,33 @@
+apiVersion: v2
+name: rust-microservices
+description: >-
+  The order saga system: catalog, customer, order, restaurant, payment, the api-gateway, one
+  CloudNativePG cluster per service, a Strimzi Kafka cluster with its topics, and the Gateway
+  API route. Needs the platform operators of deploy/platform (CNPG, Strimzi, Envoy Gateway).
+type: application
+version: 0.1.0
+dependencies:
+  - name: rust-service
+    alias: catalog
+    version: 0.1.0
+    repository: file://../rust-service
+  - name: rust-service
+    alias: customer
+    version: 0.1.0
+    repository: file://../rust-service
+  - name: rust-service
+    alias: order
+    version: 0.1.0
+    repository: file://../rust-service
+  - name: rust-service
+    alias: restaurant
+    version: 0.1.0
+    repository: file://../rust-service
+  - name: rust-service
+    alias: payment
+    version: 0.1.0
+    repository: file://../rust-service
+  - name: rust-service
+    alias: api-gateway
+    version: 0.1.0
+    repository: file://../rust-service

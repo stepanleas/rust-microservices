@@ -1,0 +1,29 @@
+# Managed by Ansible (caddy role).
+{
+	admin off
+	auto_https disable_certs
+}
+
+(lab_tls) {
+	tls /certs/wildcard.crt /certs/wildcard.key
+}
+
+git.{{ lab_domain }} {
+	import lab_tls
+	reverse_proxy forgejo:3000
+}
+
+registry.{{ lab_domain }} {
+	import lab_tls
+	reverse_proxy zot:5000
+}
+
+mirror.{{ lab_domain }} {
+	import lab_tls
+	reverse_proxy zot-mirror:5000
+}
+
+ntfy.{{ lab_domain }} {
+	import lab_tls
+	reverse_proxy ntfy:80
+}

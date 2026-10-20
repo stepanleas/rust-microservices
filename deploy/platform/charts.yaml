@@ -1,0 +1,102 @@
+# Platform charts for kind (deploy/scripts/kind-up.sh, in this order) and the homelab (one Argo CD
+# Application each, from deploy/argocd/templates/platform.yaml). Values: <name>/values.yaml, then
+# <name>/values-<target>.yaml if present.
+#   repo     Helm repository URL, oci://... for an OCI chart, or a git URL together with `path`
+#   local    true = the chart is deploy/platform/<name> in this repository (no repo/version)
+#   kind/lab false = not installed there (default: both)
+#   ignoreDifferences  passed to the Argo CD Application
+#   wave     Argo CD sync wave (default -2): storage first, then the operators and the
+#            observability stack, then what needs their CRDs and Argo CD itself; the shop's
+#            Application comes after them (deploy/argocd/templates)
+- name: local-path-provisioner
+  repo: https://github.com/rancher/local-path-provisioner.git
+  path: deploy/chart/local-path-provisioner
+  version: v0.0.37
+  namespace: local-path-storage
+  kind: false   # kind ships its own local-path StorageClass
+  wave: "-3"
+- name: metrics-server
+  repo: https://kubernetes-sigs.github.io/metrics-server/
+  chart: metrics-server
+  version: 3.14.0
+  namespace: kube-system
+- name: cloudnative-pg
+  repo: https://cloudnative-pg.github.io/charts
+  chart: cloudnative-pg
+  version: 0.29.1
+  namespace: cnpg-system
+- name: strimzi
+  repo: https://strimzi.io/charts/
+  chart: strimzi-kafka-operator
+  version: 1.2.0
+  namespace: strimzi
+  # The Kafka CRD has empty `properties: {}` objects that the API server drops.
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      name: kafkas.kafka.strimzi.io
+      jqPathExpressions: ['.spec.versions[].schema.openAPIV3Schema | .. | objects | select(.properties == {}) | .properties']
+- name: envoy-gateway
+  repo: oci://docker.io/envoyproxy/gateway-helm
+  version: v1.9.2
+  namespace: envoy-gateway-system
+- name: sealed-secrets
+  repo: https://bitnami.github.io/sealed-secrets
+  chart: sealed-secrets
+  version: 2.20.0
+  namespace: kube-system
+  kind: false
+# Observability (Phase 5): metrics, dashboards and alerts; logs; traces; the node agent.
+- name: kube-prometheus-stack
+  repo: https://prometheus-community.github.io/helm-charts
+  chart: kube-prometheus-stack
+  version: 92.10.0
+  namespace: monitoring
+- name: loki
+  repo: https://grafana-community.github.io/helm-charts
+  chart: loki
+  version: 18.16.2
+  namespace: monitoring
+- name: tempo
+  repo: https://grafana-community.github.io/helm-charts
+  chart: tempo
+  version: 3.2.0
+  namespace: monitoring
+- name: alloy
+  repo: https://grafana.github.io/helm-charts
+  chart: alloy
+  version: 1.13.1
+  namespace: monitoring
+# Autoscaling on consumer lag and requests/s (Phase 6).
+- name: keda
+  repo: https://kedacore.github.io/charts
+  chart: keda
+  version: 2.21.0
+  namespace: keda
+  # The operator generates its certificate and patches the CA into these at runtime.
+  ignoreDifferences:
+    - group: apiregistration.k8s.io
+      kind: APIService
+      jsonPointers: [/spec/caBundle, /spec/insecureSkipTLSVerify]
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions: ['.webhooks[]?.clientConfig.caBundle']
+# In-cluster k6 runners for the load tests (Phase 7).
+- name: k6-operator
+  repo: https://grafana.github.io/helm-charts
+  chart: k6-operator
+  version: 4.6.0
+  namespace: k6-operator
+# The shop's and the lab's scrape targets, alert rules and dashboards (needs the
+# kube-prometheus-stack CRDs).
+- name: monitoring
+  local: true
+  namespace: monitoring
+  wave: "-1"
+- name: argo-cd
+  repo: https://argoproj.github.io/argo-helm
+  chart: argo-cd
+  version: 10.10.3
+  namespace: argocd
+  kind: false
+  wave: "-1"

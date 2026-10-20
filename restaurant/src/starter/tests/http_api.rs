@@ -8,7 +8,9 @@ use domain::aggregates::product::Product;
 use infrastructure::postgres::{PostgresOrderApprovalRepository, PostgresProductRepository};
 use rust_decimal::dec;
 use serde_json::Value;
+use shared::db::DbHealthCheck;
 use shared::domain::value_objects::{OrderId, ProductId};
+use shared::web::health::HealthChecks;
 use starter::config::Settings;
 use starter::wiring::build_app_state;
 use uuid::Uuid;
@@ -39,6 +41,9 @@ async fn test_http_api() -> anyhow::Result<()> {
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(build_app_state(&Settings::new(), &pool)))
+            .app_data(web::Data::new(
+                HealthChecks::new().with(DbHealthCheck::new(&pool)),
+            ))
             .configure(presentation::api::configure),
     )
     .await;
@@ -135,6 +140,7 @@ async fn test_http_api() -> anyhow::Result<()> {
     )
     .await;
     assert_eq!("Ok", body["data"]["status"]);
+    assert_eq!("Ok", body["data"]["checks"]["database"]);
 
     Ok(())
 }

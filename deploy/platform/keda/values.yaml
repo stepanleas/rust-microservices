@@ -1,0 +1,20 @@
+# Event-driven autoscaling (Phase 6): the services' ScaledObjects (deploy/helm/rust-service) scale
+# on CPU, Kafka consumer lag and requests/s. KEDA creates and drives one HorizontalPodAutoscaler
+# per ScaledObject through its external metrics API.
+resources:
+  operator:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 512Mi}
+  metricServer:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 512Mi}
+  webhooks:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 256Mi}
+
+# keda_scaler_errors_total, keda_scaler_metrics_value, ... for the load-balancing dashboard and
+# the KedaScalerErrors alert.
+prometheus:
+  operator:
+    enabled: true
+    serviceMonitor: {enabled: true}

@@ -90,6 +90,7 @@ impl CancelOrderApproval {
         approval.cancel()?;
         self.approval_repository
             .save_cancellation(&approval, &products)?;
+        metrics::counter!("restaurant_order_cancellations_total").increment(1);
 
         tracing::info!(
             "Approval of order {} cancelled and {} product(s) restocked (saga {})",

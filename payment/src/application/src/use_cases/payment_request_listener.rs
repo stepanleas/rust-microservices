@@ -20,6 +20,11 @@ impl PaymentRequestMessageListener for ApplicationPaymentRequestMessageListener 
 
         match self.process_payment.execute(command) {
             Ok(Some(payment)) => {
+                metrics::counter!(
+                    "payments_processed_total",
+                    "status" => payment.payment_status_as_str(),
+                )
+                .increment(1);
                 tracing::info!(
                     "Payment {} processed for order {} with status {}",
                     payment.id(),

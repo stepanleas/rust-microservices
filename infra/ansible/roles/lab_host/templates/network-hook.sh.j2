@@ -1,0 +1,9 @@
+#!/bin/sh
+# Managed by Ansible (lab_host role). libvirt calls this as: network <name> <operation> <sub-op> -
+# When the lab network starts, route *.{{ lab_domain }} lookups to dnsmasq on the ops VM.
+if [ "$1" = "{{ lab.network.name }}" ] && [ "$2" = "started" ]; then
+  resolvectl dns {{ lab.network.bridge }} {{ lab_ops_ip }}
+  resolvectl domain {{ lab.network.bridge }} '~{{ lab_domain }}'
+  resolvectl default-route {{ lab.network.bridge }} false
+fi
+exit 0

@@ -61,9 +61,12 @@ pub struct OutboxMessage<K: MessageKind> {
     status: OutboxStatus,
     attempts: i32,
     created_at: DateTime<Utc>,
+    trace_context: Option<String>,
 }
 
 impl<K: MessageKind> OutboxMessage<K> {
+    /// Remembers the current trace (see [`crate::trace_context`]), so the relay publishes the
+    /// message as part of the trace that wrote it.
     pub fn new<T: Serialize>(saga_id: Uuid, message_type: K, payload: &T) -> anyhow::Result<Self> {
         Ok(Self {
             id: Uuid::new_v4(),
@@ -73,6 +76,7 @@ impl<K: MessageKind> OutboxMessage<K> {
             status: OutboxStatus::Started,
             attempts: 0,
             created_at: Utc::now(),
+            trace_context: crate::trace_context::current(),
         })
     }
 
@@ -93,7 +97,14 @@ impl<K: MessageKind> OutboxMessage<K> {
             status,
             attempts,
             created_at,
+            trace_context: None,
         }
+    }
+
+    /// Sets the `traceparent` of a restored message.
+    pub fn with_trace_context(mut self, trace_context: Option<String>) -> Self {
+        self.trace_context = trace_context;
+        self
     }
 
     pub fn id(&self) -> Uuid {
@@ -127,4 +138,18 @@ impl<K: MessageKind> OutboxMessage<K> {
     pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
+
+    /// The `traceparent` of the span that created the message.
+    pub fn trace_context(&self) -> Option<&str> {
+        self.trace_context.as_deref()
+    }
+}
+
+/// What is waiting in an outbox, for the relay's metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct OutboxBacklog {
+    pub started: i64,
+    pub failed: i64,
+    /// Creation time of the oldest `STARTED` message.
+    pub oldest_started: Option<DateTime<Utc>>,
 }

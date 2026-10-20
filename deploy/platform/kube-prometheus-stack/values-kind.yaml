@@ -1,0 +1,38 @@
+# kind: small, no volumes, Grafana at http://localhost:8088/grafana (the shop's Gateway).
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    retentionSize: ""
+    storageSpec: {}
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+      limits: {memory: 2Gi}
+
+# kind binds etcd, the scheduler and the controller manager to localhost: not scrapable.
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+
+grafana:
+  adminUser: admin
+  adminPassword: admin
+  grafana.ini:
+    server:
+      root_url: http://localhost:8088/grafana/
+      serve_from_sub_path: true
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+  # Served under /grafana: /metrics would redirect there.
+  serviceMonitor:
+    path: /grafana/metrics
+  route:
+    main:
+      enabled: true
+      parentRefs:
+        - {name: shop, namespace: shop}
+      matches:
+        - path: {type: PathPrefix, value: /grafana}

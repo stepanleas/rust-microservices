@@ -1,4 +1,3 @@
-pub mod api_health_check;
 pub mod api_info;
 pub mod api_orders;
 pub mod docs;
@@ -18,11 +17,6 @@ pub fn configure(cfg: &mut ServiceConfig) {
             .service(api_orders::create)
             .service(api_orders::track),
     );
-    cfg.service(
-        web::scope("/api/health")
-            .service(api_health_check::startup)
-            .service(api_health_check::ready)
-            .service(api_health_check::live),
-    );
+    cfg.service(web::scope("/api/health").configure(shared::web::health::configure));
     cfg.service(web::scope("/api/info").service(api_info::info));
 }

@@ -18,6 +18,7 @@ use shared::db::DbSettings;
 use shared::kafka::RetryPolicy;
 use shared::outbox::postgres::PostgresOutboxRepository;
 use shared::outbox::relay::{OutboxRelay, RelaySettings};
+use shared::shutdown::Shutdown;
 use std::sync::Arc;
 use std::thread;
 
@@ -73,14 +74,21 @@ pub fn build_outbox_relay(settings: &Settings, pool: &DbPool) -> OutboxRelay<Out
             poll_interval: settings.outbox_poll_interval,
             batch_size: settings.outbox_batch_size,
             max_attempts: settings.outbox_max_attempts,
+            retention: settings.outbox_retention,
         },
     )
 }
 
-/// Consumes the payment topics on a dedicated thread, forever.
-pub fn spawn_kafka_listener(settings: &Settings, pool: &DbPool) -> thread::JoinHandle<()> {
+/// Consumes the payment topics on a dedicated thread until `shutdown`.
+pub fn spawn_kafka_listener(
+    settings: &Settings,
+    pool: &DbPool,
+    shutdown: &Shutdown,
+) -> thread::JoinHandle<()> {
     let hosts = kafka_hosts(settings);
     let handler = Arc::new(build_message_handler(pool));
+
+    let shutdown = shutdown.clone();
 
     thread::spawn(move || {
         shared::kafka::listen(
@@ -88,11 +96,16 @@ pub fn spawn_kafka_listener(settings: &Settings, pool: &DbPool) -> thread::JoinH
             CONSUMER_GROUP.to_string(),
             handler,
             RetryPolicy::default(),
+            &shutdown,
         )
     })
 }
 
-/// Publishes the outbox messages on a dedicated thread, forever.
-pub fn spawn_outbox_relay(settings: &Settings, pool: &DbPool) -> thread::JoinHandle<()> {
-    build_outbox_relay(settings, pool).spawn()
+/// Publishes the outbox messages on a dedicated thread until `shutdown`.
+pub fn spawn_outbox_relay(
+    settings: &Settings,
+    pool: &DbPool,
+    shutdown: &Shutdown,
+) -> thread::JoinHandle<()> {
+    build_outbox_relay(settings, pool).spawn(shutdown)
 }

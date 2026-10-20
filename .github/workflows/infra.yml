@@ -1,0 +1,126 @@
+name: infra
+
+# Static checks of the homelab and Kubernetes code, on GitHub and on the lab's Forgejo alike.
+on:
+  push:
+    branches:
+      - main
+      - feat/*
+      - feature/*
+      - fix/*
+    paths:
+      - "infra/**"
+      - "deploy/**"
+      - "load-tests/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      - "deploy/**"
+      - "load-tests/**"
+      - ".github/workflows/infra.yml"
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUBECONFORM_VERSION: v0.8.0
+  HELM_VERSION: v4.3.0
+  PROMETHEUS_VERSION: 3.9.1
+
+jobs:
+  ansible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The same pinned Ansible + ansible-lint as `make lab_tools`.
+      - name: Install Ansible
+        run: ./infra/scripts/lab-tools.sh
+
+      # CI never sees the vault password: a dummy one lets the syntax checks run, and the vault
+      # itself is skipped as undecryptable.
+      - name: ansible-lint
+        working-directory: infra/ansible
+        run: |
+          echo not-the-vault-password > "$RUNNER_TEMP/vault-pass"
+          ANSIBLE_VAULT_PASSWORD_FILE="$RUNNER_TEMP/vault-pass" ../../.tools/ansible/bin/ansible-lint
+
+  kubernetes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm, kubeconform and promtool
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" \
+            | tar -xz -C "$bin" --strip-components 1 linux-amd64/helm
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C "$bin" kubeconform
+          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v$PROMETHEUS_VERSION/prometheus-$PROMETHEUS_VERSION.linux-amd64.tar.gz" \
+            | tar -xz -C "$bin" --strip-components 1 "prometheus-$PROMETHEUS_VERSION.linux-amd64/promtool"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      # The alert rules are plain Prometheus rule files (the chart wraps them in PrometheusRules).
+      - name: promtool check rules
+        run: promtool check rules deploy/platform/monitoring/rules/*.yaml
+
+      - name: helm lint
+        working-directory: deploy/helm
+        run: |
+          helm dependency build rust-microservices
+          for values in rust-microservices/values-*.yaml; do
+            helm lint rust-microservices -f "$values"
+          done
+          helm lint rust-service
+          helm lint ../argocd
+          for values in ../platform/monitoring/values-*.yaml; do
+            helm lint ../platform/monitoring -f "$values"
+          done
+
+      # Validates against the Kubernetes version of the lab, and the operators' CRDs (Kafka,
+      # CNPG Cluster, Gateway, Argo CD Application, ...) against the community schema catalog.
+      # Every load-test script parses and builds its scenarios (k6 version from versions.yaml).
+      - name: k6 inspect
+        run: |
+          version=$(sed -n '/^k6:/,/version:/s/^  version: //p' deploy/platform/versions.yaml)
+          curl -fsSL "https://github.com/grafana/k6/releases/download/$version/k6-$version-linux-amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" --strip-components 1 "k6-$version-linux-amd64/k6"
+          for script in load-tests/k6/seed.js load-tests/k6/scenarios/*.js; do
+            echo "== $script"
+            "$RUNNER_TEMP/k6" inspect --execution-requirements "$script" >/dev/null
+          done
+
+      - name: kubeconform
+        run: |
+          version=$(sed -n 's/^kubernetes_version: //p' infra/ansible/inventory/group_vars/all/main.yml)
+          validate() {
+            kubeconform -strict -summary -kubernetes-version "$version" \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              "$@"
+          }
+          for values in deploy/helm/rust-microservices/values-*.yaml; do
+            echo "== $values"
+            helm template rust-microservices deploy/helm/rust-microservices -f "$values" | validate -
+            # With KEDA: ScaledObjects instead of HorizontalPodAutoscalers.
+            helm template rust-microservices deploy/helm/rust-microservices -f "$values" \
+              --api-versions keda.sh/v1alpha1/ScaledObject | validate -
+          done
+          echo "== deploy/argocd"
+          helm template lab-apps deploy/argocd | validate -
+          echo "== deploy/platform/monitoring"
+          helm template monitoring deploy/platform/monitoring | validate -
+          helm template monitoring deploy/platform/monitoring \
+            -f deploy/platform/monitoring/values-lab.yaml | validate -
+          echo "== deploy/platform/*/{kind,lab}"
+          validate deploy/platform/*/kind deploy/platform/*/lab

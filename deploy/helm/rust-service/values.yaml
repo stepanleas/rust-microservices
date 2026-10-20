@@ -1,0 +1,69 @@
+# Defaults for one service; the rust-microservices chart sets these per alias.
+
+# Resource and container name. Defaults to the chart alias (e.g. `order`).
+name: ""
+
+image:
+  # Defaults: global.image.registry + "/" + global.image.namespace + "/rust-<name>".
+  repository: ""
+  tag: ""
+  pullPolicy: ""
+
+replicas: 2
+port: 8080
+
+# Plain environment variables (rendered into a ConfigMap).
+env: {}
+
+# Builds DATABASE_URL from the CloudNativePG cluster `<cluster>`: credentials from its
+# `<cluster>-app` secret, host = its PgBouncer pooler `<cluster>-pooler`.
+database:
+  enabled: false
+  cluster: ""
+  maxConnections: 10
+
+# ServiceMonitor for kube-prometheus-stack (only rendered when its CRD exists).
+metrics:
+  enabled: true
+  path: /metrics
+  interval: 15s
+
+probes:
+  startupPath: /api/health/startup
+  livenessPath: /api/health/live
+  readinessPath: /api/health/ready
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  # A KEDA ScaledObject instead of the HorizontalPodAutoscaler, when the KEDA CRDs exist. It keeps
+  # the CPU target and adds the triggers below; the replicas can be pinned with the
+  # `autoscaling.keda.sh/paused-replicas` annotation (deploy/scripts/replicas.sh).
+  keda:
+    enabled: false
+    # Kafka consumer lag of the group, summed over its topics: one replica per `lagThreshold`
+    # messages, never more replicas than partitions. Empty group = no lag trigger.
+    kafka:
+      consumerGroup: ""
+      lagThreshold: 100
+    # Requests/s to this service (http_requests_total, health checks excluded): one replica per
+    # `threshold`. 0 = no requests trigger. The Prometheus URL: global.autoscaling.prometheusUrl.
+    requestsPerSecond:
+      threshold: 0
+
+podDisruptionBudget:
+  minAvailable: 1
+
+# HTTP drains in up to 30 s, then the Kafka listener and outbox relay get up to 15 s
+# (shared::web::serve), after the 5 s preStop delay.
+terminationGracePeriodSeconds: 60
+preStopSleepSeconds: 5

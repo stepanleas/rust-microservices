@@ -7,9 +7,6 @@ use shared::domain::value_objects::CustomerId;
 use shared::kafka::KafkaProducer;
 use std::sync::Mutex;
 
-/// Topics this publisher writes to, for building its [`KafkaProducer`].
-pub const CUSTOMER_TOPICS: [&str; 2] = [CUSTOMER_CREATED, CUSTOMER_UPDATED];
-
 /// Publishes customer events straight to Kafka, keyed by customer id.
 ///
 /// The use cases call it from actix's blocking pool (`shared::web::blocking`), so waiting on

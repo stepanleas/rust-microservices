@@ -1,0 +1,61 @@
+{{- if .Values.gateway.enabled }}
+{{- $parent := .Values.gateway.parentRef }}
+{{- if not $parent }}
+# North-south entry: Envoy (Gateway API) -> api-gateway, which routes /shop/<service>/...
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shop
+spec:
+  gatewayClassName: {{ .Values.gateway.className }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      {{- with .Values.gateway.hostname }}
+      hostname: {{ . }}
+      {{- end }}
+      # Also admits other namespaces' routes, e.g. Grafana at /grafana on kind.
+      allowedRoutes:
+        namespaces: {from: All}
+---
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shop
+spec:
+  parentRefs:
+    {{- if $parent }}
+    {{- toYaml (list $parent) | nindent 4 }}
+    {{- else }}
+    - name: shop
+    {{- end }}
+  {{- with .Values.gateway.hostname }}
+  hostnames: [{{ . | quote }}]
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: api-gateway
+          port: {{ index .Values "api-gateway" "port" }}
+    {{- if .Values.gateway.directRoutes }}
+    {{- range $service := list "catalog" "customer" "order" "restaurant" "payment" }}
+    # /direct/{{ $service }}/<rest> -> {{ $service }}/<rest>, skipping the api-gateway hop.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /direct/{{ $service }}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+      backendRefs:
+        - name: {{ $service }}
+          port: {{ (index $.Values $service).port }}
+    {{- end }}
+    {{- end }}
+{{- end }}

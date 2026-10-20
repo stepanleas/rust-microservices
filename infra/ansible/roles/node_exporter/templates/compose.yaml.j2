@@ -1,0 +1,15 @@
+# Managed by Ansible (node_exporter role).
+services:
+  node-exporter:
+    image: {{ node_exporter_image }}
+    container_name: node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address={{ lab_ip }}:9100
+      # *.prom files written by Ansible, e.g. the expiry of the lab certificates.
+      - --collector.textfile.directory=/host/opt/lab/node-exporter/textfile
+    volumes:
+      - /:/host:ro,rslave

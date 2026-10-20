@@ -1,0 +1,115 @@
+# Prometheus, Alertmanager, Grafana, node-exporter and kube-state-metrics, with the upstream
+# rules and dashboards for Kubernetes. The shop's and the lab's own scrape targets, rules and
+# dashboards are in deploy/platform/monitoring; logs and traces in loki/, tempo/ and alloy/.
+
+# The admission webhooks need Helm hook jobs that patch a caBundle after install, which Argo CD
+# keeps reporting as drift. Rules are linted in CI (promtool) instead.
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+
+prometheus:
+  prometheusSpec:
+    # Every ServiceMonitor, PodMonitor, rule and ScrapeConfig in the cluster, not only the ones
+    # of this release.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    # Tempo's metrics generator (and k6 in Phase 8) write here.
+    enableRemoteWriteReceiver: true
+    # Exemplars: Tempo's span metrics point at example traces of a latency bucket.
+    enableFeatures: [exemplar-storage]
+    retention: 7d
+    retentionSize: 8GB
+    resources:
+      requests: {cpu: 200m, memory: 1Gi}
+      limits: {memory: 3Gi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 10Gi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 128Mi}
+
+# Cilium replaces kube-proxy on the lab (kind's kube-proxy only listens on localhost).
+kubeProxy:
+  enabled: false
+
+grafana:
+  defaultDashboardsTimezone: browser
+  # Dashboards come from ConfigMaps (sidecar), not from the UI.
+  persistence:
+    enabled: false
+  sidecar:
+    dashboards:
+      # Folder per dashboard from the ConfigMap's `grafana_folder` annotation.
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+    datasources:
+      # Exemplars on the Prometheus datasource open the trace in Tempo.
+      exemplarTraceIdDestinations:
+        datasourceUid: tempo
+        traceIdLabelName: trace_id
+  # `$$` escapes `$` from Grafana's environment variable expansion in provisioning files.
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      url: http://loki.monitoring:3100
+      jsonData:
+        maxLines: 1000
+        # The services' JSON lines carry the trace id of their span: link it to Tempo.
+        derivedFields:
+          - name: trace_id
+            matcherRegex: '"trace_id":"(\w+)"'
+            datasourceUid: tempo
+            url: "$${__value.raw}"
+            urlDisplayLabel: View trace
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      url: http://tempo.monitoring:3200
+      jsonData:
+        # From a span to the logs of every service the trace touched.
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: -5m
+          spanEndTimeShift: 5m
+          customQuery: true
+          query: '{namespace="shop"} |= "$${__trace.traceId}"'
+        # From a span to the RED metrics of its service.
+        tracesToMetrics:
+          datasourceUid: prometheus
+          spanStartTimeShift: -5m
+          spanEndTimeShift: 5m
+          tags:
+            - {key: service.name, value: service}
+          queries:
+            - name: Request rate
+              query: sum(rate(http_requests_total{$$__tags}[1m]))
+            - name: p95 latency
+              query: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{$$__tags}[1m])))
+        # Service graph and span metrics from Tempo's metrics generator.
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+        lokiSearch:
+          datasourceUid: loki
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}

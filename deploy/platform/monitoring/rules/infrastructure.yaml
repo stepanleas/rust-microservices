@@ -1,0 +1,73 @@
+# Alerts of the homelab (rendered only with lab.enabled): the VMs, Argo CD, the lab CA and the
+# ops VM's services. kube-prometheus-stack's own rules cover the rest of Kubernetes.
+groups:
+  - name: lab-nodes
+    rules:
+      # kube-prometheus-stack's KubeNodeNotReady waits 15 minutes; a lab node is gone sooner.
+      - alert: LabNodeNotReady
+        expr: max by (node) (kube_node_status_condition{condition="Ready", status="true"}) == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Node {{ $labels.node }} is not ready"
+          description: Its pods are being evicted; Postgres and Kafka volumes on it wait for it to come back.
+      - alert: LabDiskAlmostFull
+        expr: |
+          (1 - node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
+                 / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}) > 0.85
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.instance }}: root disk {{ $value | humanizePercentage }} full"
+          description: Prune images (Zot GC, containerd) or old volumes before the VM runs out of space.
+      - alert: LabOpsVmDown
+        expr: up{job="scrapeConfig/monitoring/ops-node-exporter"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: The ops VM does not answer
+          description: DNS, the registry, Forgejo, CI and ntfy are unavailable; alerts can't be delivered either.
+
+  - name: lab-services
+    rules:
+      - alert: LabOpsServiceDown
+        expr: up{job="scrapeConfig/monitoring/ops-services"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} on the ops VM does not answer"
+          description: "https://{{ $labels.instance }}/metrics fails: check `docker ps` on the ops VM."
+      # lab_ci_runner_up comes from a timer on the ops VM (infra/ansible/roles/node_exporter).
+      # `make lab_quiet` stops the runner on purpose during load tests, hence the 15 minutes.
+      - alert: LabCiRunnerOffline
+        expr: |
+          max(lab_ci_runner_up) == 0
+            or (absent(lab_ci_runner_up) and on () max(up{job="scrapeConfig/monitoring/ops-node-exporter"}) == 1)
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: The Forgejo Actions runner is offline
+          description: "CI and releases on the lab queue up. On the ops VM: `docker start forgejo-runner` (or `make lab_unquiet`); if it runs but takes no jobs, `docker restart forgejo-runner`."
+      - alert: LabCertificateExpiring
+        expr: lab_certificate_expiry_timestamp_seconds - time() < 14 * 86400
+        labels: {severity: warning}
+        annotations:
+          summary: "The lab {{ $labels.certificate }} certificate expires in {{ $value | humanizeDuration }}"
+          description: Run `make lab_provision` to renew it (the wildcard is renewed 30 days before expiry).
+
+  - name: lab-gitops
+    rules:
+      - alert: LabArgoAppOutOfSync
+        expr: max by (name) (argocd_app_info{sync_status="OutOfSync"}) == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Argo CD application {{ $labels.name }} is OutOfSync"
+          description: The cluster differs from git for 10 minutes; check the application's diff in Argo CD.
+      - alert: LabArgoAppDegraded
+        expr: max by (name) (argocd_app_info{health_status=~"Degraded|Missing"}) == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Argo CD application {{ $labels.name }} is {{ $labels.health_status }}"
+          description: Some of its resources are unhealthy for 10 minutes.

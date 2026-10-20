@@ -1,0 +1,9 @@
+# Pinned kind version and node image. The platform chart versions, shared with the homelab, are
+# in charts.yaml.
+kind:
+  version: v0.33.0
+  node: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+
+# k6 for the load tests on the host (make load_tool); the k6-operator's runners use the same.
+k6:
+  version: v2.3.0

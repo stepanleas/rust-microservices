@@ -1,0 +1,25 @@
+# Managed by Ansible (forgejo_runner role).
+log:
+  level: info
+runner:
+  file: /data/.runner
+  capacity: 2
+  timeout: 3h
+  # Node-based actions (checkout, cache, ...) trust the lab CA through the mounted bundle.
+  envs:
+    NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+  labels:
+    - ubuntu-latest:docker://{{ forgejo_runner_job_image }}
+cache:
+  enabled: true
+container:
+  # Jobs share the ops VM's network: testcontainers (and the Kafka module's advertised listener)
+  # reach the test containers on 127.0.0.1 as on GitHub, and the runner's cache server is
+  # reachable. Jobs already get the Docker socket, so this gives away no extra isolation.
+  network: host
+  # Job containers see the ops VM's CA bundle (with the lab CA) and its Docker daemon, for buildx.
+  options: -v /etc/ssl/certs:/etc/ssl/certs:ro -v /var/run/docker.sock:/var/run/docker.sock
+  valid_volumes:
+    - /etc/ssl/certs
+    - /var/run/docker.sock
+  docker_host: "-"

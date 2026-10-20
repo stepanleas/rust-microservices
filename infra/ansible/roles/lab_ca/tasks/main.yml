@@ -1,0 +1,76 @@
+# Runs on the Ansible host: the CA lives in ~/.lab/ca, so it survives `vagrant destroy` and the
+# host keeps trusting the same root. Name constraints limit it to lab names, so trusting it in the
+# browser can't be abused for other sites.
+- name: CA directory
+  ansible.builtin.file:
+    path: "{{ lab_ca_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: CA private key
+  community.crypto.openssl_privatekey:
+    path: "{{ lab_ca_dir }}/ca.key"
+    type: ECC
+    curve: secp384r1
+    mode: "0600"
+
+- name: CA signing request
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ lab_ca_dir }}/ca.key"
+    common_name: rust-microservices lab CA
+    basic_constraints: ["CA:TRUE", "pathlen:0"]
+    basic_constraints_critical: true
+    key_usage: [keyCertSign, cRLSign]
+    key_usage_critical: true
+    name_constraints_permitted:
+      - "DNS:{{ lab_domain }}"
+      - "IP:{{ lab.network.cidr }}"
+    name_constraints_critical: true
+  register: lab_ca_csr
+  changed_when: false
+
+- name: CA certificate (10 years)
+  community.crypto.x509_certificate:
+    path: "{{ lab_ca_dir }}/ca.crt"
+    csr_content: "{{ lab_ca_csr.csr }}"
+    privatekey_path: "{{ lab_ca_dir }}/ca.key"
+    provider: selfsigned
+    selfsigned_not_after: +3650d
+    mode: "0644"
+
+# One wildcard certificate for everything Caddy serves on the ops VM. In-cluster names get
+# theirs from cert-manager with the same CA (Phase 4).
+- name: Wildcard key
+  community.crypto.openssl_privatekey:
+    path: "{{ lab_ca_dir }}/wildcard.key"
+    type: ECC
+    curve: secp256r1
+    mode: "0600"
+
+- name: Wildcard signing request
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ lab_ca_dir }}/wildcard.key"
+    common_name: "*.{{ lab_domain }}"
+    subject_alt_name: ["DNS:*.{{ lab_domain }}", "DNS:{{ lab_domain }}"]
+    extended_key_usage: [serverAuth]
+  register: lab_wildcard_csr
+  changed_when: false
+
+- name: Check whether the wildcard certificate is still valid in 30 days
+  community.crypto.x509_certificate_info:
+    path: "{{ lab_ca_dir }}/wildcard.crt"
+    valid_at:
+      renew: +30d
+  register: lab_wildcard_info
+  failed_when: false
+
+- name: Wildcard certificate (1 year, renewed 30 days before expiry)
+  community.crypto.x509_certificate:
+    path: "{{ lab_ca_dir }}/wildcard.crt"
+    csr_content: "{{ lab_wildcard_csr.csr }}"
+    provider: ownca
+    ownca_path: "{{ lab_ca_dir }}/ca.crt"
+    ownca_privatekey_path: "{{ lab_ca_dir }}/ca.key"
+    ownca_not_after: +365d
+    force: "{{ not (lab_wildcard_info.valid_at.renew | default(false)) }}"
+    mode: "0644"

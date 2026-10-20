@@ -15,10 +15,24 @@
 # accepts). It needs cargo on the host and Kafka on KAFKA_HOST. By default it stops/starts the
 # docker compose `payment` service; override PAYMENT_STOP_CMD / PAYMENT_START_CMD when payment runs
 # elsewhere, or set SKIP_COMPENSATION=1 to skip it.
+#
+# BASE_URL=http://localhost:8088 sends every call through the api-gateway
+# (<BASE_URL>/shop/<service>/...). TARGET=k8s stops/starts payment with `kubectl scale` in
+# NAMESPACE (default shop) of the current kube context, e.g. kind:
+#
+#   BASE_URL=http://localhost:8088 TARGET=k8s KAFKA_HOST=localhost:9093 ./scripts/e2e-saga.sh
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 
+BASE_URL=${BASE_URL:-}
+if [[ -n "$BASE_URL" ]]; then
+  CATALOG_URL=${CATALOG_URL:-$BASE_URL/shop/catalog}
+  ORDER_URL=${ORDER_URL:-$BASE_URL/shop/order}
+  CUSTOMER_URL=${CUSTOMER_URL:-$BASE_URL/shop/customer}
+  RESTAURANT_URL=${RESTAURANT_URL:-$BASE_URL/shop/restaurant}
+  PAYMENT_URL=${PAYMENT_URL:-$BASE_URL/shop/payment}
+fi
 CATALOG_URL=${CATALOG_URL:-http://localhost:8080}
 ORDER_URL=${ORDER_URL:-http://localhost:8081}
 CUSTOMER_URL=${CUSTOMER_URL:-http://localhost:8082}
@@ -26,12 +40,47 @@ RESTAURANT_URL=${RESTAURANT_URL:-http://localhost:8083}
 PAYMENT_URL=${PAYMENT_URL:-http://localhost:8084}
 TIMEOUT=${TIMEOUT:-60}
 KAFKA_HOST=${KAFKA_HOST:-localhost:9092}
-COMPOSE="docker compose -f $ROOT_DIR/docker-compose/development/docker-compose.yml"
-PAYMENT_STOP_CMD=${PAYMENT_STOP_CMD:-$COMPOSE stop payment}
-PAYMENT_START_CMD=${PAYMENT_START_CMD:-$COMPOSE start payment}
+TARGET=${TARGET:-compose}
+NAMESPACE=${NAMESPACE:-shop}
+if [[ "$TARGET" == "k8s" ]]; then
+  PAYMENT_STOP_CMD=${PAYMENT_STOP_CMD:-k8s_payment stop}
+  PAYMENT_START_CMD=${PAYMENT_START_CMD:-k8s_payment start}
+else
+  COMPOSE="docker compose -f $ROOT_DIR/docker-compose/development/docker-compose.yml"
+  PAYMENT_STOP_CMD=${PAYMENT_STOP_CMD:-$COMPOSE stop payment}
+  PAYMENT_START_CMD=${PAYMENT_START_CMD:-$COMPOSE start payment}
+fi
 SKIP_COMPENSATION=${SKIP_COMPENSATION:-0}
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
+
+# Stops or restarts payment in Kubernetes. KEDA would scale a Deployment below its minimum back
+# up, so with a ScaledObject the replicas are pinned to 0 (paused) and then handed back to it; a
+# plain HPA leaves a Deployment at 0 replicas alone and scales it back to its minimum once restarted.
+k8s_payment() {
+  local k="kubectl -n $NAMESPACE" keda=""
+  $k get scaledobject/payment >/dev/null 2>&1 && keda=1
+  if [[ "$1" == "stop" ]]; then
+    if [[ -n "$keda" ]]; then
+      $k annotate --overwrite scaledobject/payment autoscaling.keda.sh/paused-replicas=0
+    else
+      $k scale deploy/payment --replicas=0
+    fi
+    $k wait --for=delete pod -l app.kubernetes.io/name=payment --timeout=120s
+  else
+    if [[ -n "$keda" ]]; then
+      $k annotate scaledobject/payment autoscaling.keda.sh/paused-replicas-
+      # KEDA restores the minimum replicas on its next reconcile.
+      for _ in $(seq 1 30); do
+        [[ $($k get deploy/payment -o jsonpath='{.spec.replicas}') != 0 ]] && break
+        sleep 2
+      done
+    else
+      $k scale deploy/payment --replicas=1
+    fi
+    $k rollout status deploy/payment --timeout=180s
+  fi
+}
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31mFAIL: %s\033[0m\n' "$*"; exit 1; }

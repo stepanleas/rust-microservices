@@ -1,0 +1,10 @@
+# Managed by Ansible (node_exporter role).
+[Unit]
+Description=Write the CI runner's state for node-exporter every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

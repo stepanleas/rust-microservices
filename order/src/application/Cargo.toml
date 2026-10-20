@@ -13,6 +13,7 @@ anyhow.workspace = true
 rusty-money.workspace = true
 rust_decimal.workspace = true
 tracing.workspace = true
+metrics.workspace = true
 mockall = { workspace = true, optional = true }
 chrono.workspace = true
 shared = { workspace = true, features = ["outbox"] }
@@ -22,3 +23,8 @@ domain = { path = "../domain" }
 [dev-dependencies]
 mockall.workspace = true
 serde_json.workspace = true
+criterion = "0.8.2"
+
+[[bench]]
+name = "create_order"
+harness = false

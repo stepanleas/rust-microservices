@@ -1,0 +1,22 @@
+# Lab-only manifests next to the platform charts they configure (kind has */kind/ instead),
+# e.g. the shared HTTPS Gateway in deploy/platform/envoy-gateway/lab/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lab-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.revision }}
+    path: deploy/platform
+    directory:
+      recurse: true
+      include: "*/lab/*.yaml"
+  syncPolicy:
+    {{- include "lab-apps.syncPolicy" . | nindent 4 }}

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: rust-service
+description: >-
+  One Rust microservice (Deployment, Service, ConfigMap, HPA, PDB, ServiceMonitor). Used by the
+  rust-microservices chart once per service, aliased to the service name.
+type: application
+version: 0.1.0

@@ -1,0 +1,123 @@
+# Alerts of the shop (namespace `shop`): the services' own metrics (shared::observability), the
+# kafka-exporter, kube-state-metrics. `service` is the Kubernetes Service of the scraped pod.
+groups:
+  - name: shop-http
+    rules:
+      - alert: ShopHighErrorRate
+        expr: |
+          sum by (service) (rate(http_requests_total{namespace="shop", status=~"5.."}[5m]))
+            / sum by (service) (rate(http_requests_total{namespace="shop"}[5m]))
+            > 0.01
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }}: {{ $value | humanizePercentage }} of the requests fail (5xx)"
+          description: More than 1% of the HTTP responses of {{ $labels.service }} are 5xx for 5 minutes.
+      - alert: ShopLatencySloBreached
+        expr: |
+          histogram_quantile(0.95,
+            sum by (service, le) (rate(http_request_duration_seconds_bucket{namespace="shop", route!~"/api/health/.*"}[5m]))
+          ) > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }}: p95 latency {{ $value | humanizeDuration }}"
+          description: The 95th percentile of the HTTP latency of {{ $labels.service }} is above 500 ms for 10 minutes.
+      - alert: ShopCircuitBreakerOpen
+        expr: max by (breaker) (gateway_circuit_breaker_state{namespace="shop"}) == 2
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "api-gateway: {{ $labels.breaker }} is open"
+          description: The gateway answers the upstream's requests with the fallback (503) without calling it.
+
+  # kafka-exporter reports a lag of -1 for partitions the group never committed: clamp to 0.
+  - name: shop-messaging
+    rules:
+      - alert: ShopConsumerLagGrowing
+        expr: |
+          sum by (consumergroup, topic) (clamp_min(kafka_consumergroup_lag{namespace="shop"}, 0)) > 10
+            and deriv(sum by (consumergroup, topic) (clamp_min(kafka_consumergroup_lag{namespace="shop"}, 0))[10m:1m]) > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.consumergroup }} falls behind on {{ $labels.topic }} ({{ $value }} messages)"
+          description: The consumer lag keeps growing for 10 minutes; the consumers are down or too slow.
+      - alert: ShopOutboxStuck
+        expr: max by (service) (outbox_oldest_started_age_seconds{namespace="shop"}) > 60
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }}: an outbox message waits for {{ $value | humanizeDuration }}"
+          description: The oldest STARTED outbox message is older than 60 s; the relay can't publish to Kafka.
+      - alert: ShopOutboxMessagesFailed
+        expr: max by (service) (outbox_messages{namespace="shop", status="FAILED"}) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }}: {{ $value }} outbox messages FAILED"
+          description: The relay gave up on these messages after OUTBOX_MAX_ATTEMPTS; their sagas are stuck.
+      - alert: ShopDeadLetters
+        expr: sum by (topic) (increase(kafka_topic_partition_current_offset{namespace="shop", topic=~".+\\.dlq"}[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Messages were dead-lettered to {{ $labels.topic }}"
+          description: A consumer gave up on messages after its retries; they wait in the .dlq topic.
+
+  - name: shop-resources
+    rules:
+      - alert: ShopPodRestarting
+        expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[15m]) > 2
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.pod }} restarted {{ $value | humanize }} times in 15 minutes"
+          description: Check its logs and the previous container's exit reason.
+      - alert: ShopDbPoolExhausted
+        expr: |
+          histogram_quantile(0.95, sum by (service, le) (rate(db_pool_wait_seconds_bucket{namespace="shop"}[5m]))) > 1
+            or sum by (service) (increase(db_pool_timeouts_total{namespace="shop"}[5m])) > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }}: requests wait for a database connection"
+          description: Getting a connection from the pool takes more than 1 s (p95) or times out; raise DB_MAX_CONNECTIONS or the replicas' share of the pooler.
+      - alert: ShopPostgresDown
+        expr: |
+          max by (pod) (kube_pod_status_ready{namespace="shop", condition="true", pod=~".+-db-[0-9]+"}) == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Postgres {{ $labels.pod }} is not ready"
+          description: The service using this database can't serve or process messages.
+      - alert: ShopKafkaDown
+        expr: |
+          max(kube_pod_status_ready{namespace="shop", condition="true", pod=~"kafka-dual-role-[0-9]+"}) == 0
+            or absent(kube_pod_status_ready{namespace="shop", condition="true", pod=~"kafka-dual-role-[0-9]+"})
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Kafka is not ready
+          description: No saga progresses and the outboxes fill up until the broker is back.
+
+  # KEDA (deploy/platform/keda) scales the services: a failing trigger freezes them at their
+  # current replicas, a capped one can't absorb more load.
+  - name: shop-autoscaling
+    rules:
+      - alert: ShopAutoscalerTriggerFailing
+        expr: sum by (scaledObject, scaler) (increase(keda_scaler_errors_total[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.scaledObject }}: the {{ $labels.scaler }} trigger fails"
+          description: KEDA can't read this trigger's metric (Kafka or Prometheus unreachable?), so the service doesn't scale on it. See the keda-operator logs.
+      - alert: ShopAutoscalerAtMaximum
+        expr: |
+          max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_desired_replicas{namespace="shop"})
+            >= max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop"})
+            and max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop"})
+            > max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_min_replicas{namespace="shop"})
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.horizontalpodautoscaler }} wants more replicas than its maximum"
+          description: The service has been at its maximum replicas for 15 minutes; raise autoscaling.maxReplicas or find the bottleneck (Kafka partitions, database).

@@ -1,20 +1,39 @@
-use super::ports::{OutboxMessagePublisher, OutboxRepository};
-use super::{MessageKind, OutboxStatus};
+use super::MessageKind;
+use super::ports::{ClaimedBatch, OutboxMessagePublisher, OutboxRepository};
+use crate::shutdown::Shutdown;
+use crate::trace_context;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tracing::field::Empty;
+
+/// How often the relay deletes old `COMPLETED` messages.
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(300);
+/// How often the relay publishes the backlog metrics.
+const BACKLOG_INTERVAL: Duration = Duration::from_secs(15);
+/// Rows deleted per statement during cleanup.
+const CLEANUP_BATCH: i64 = 5_000;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RelaySettings {
     pub poll_interval: Duration,
     pub batch_size: i64,
     pub max_attempts: i32,
+    /// `COMPLETED` messages older than this are deleted (`OUTBOX_RETENTION_HOURS`).
+    pub retention: Duration,
 }
 
 /// Polls the outbox table and relays pending messages to the message broker.
 ///
 /// A message is marked `COMPLETED` only after the broker acknowledged it, so delivery is
-/// at-least-once: consumers must be idempotent. Assumes a single relay per service; a second
-/// one would only cause duplicate sends.
+/// at-least-once: consumers must be idempotent. Every replica of a service runs a relay: each
+/// batch is claimed with `FOR UPDATE SKIP LOCKED`, so two relays never send the same message.
+///
+/// A message is published in the trace that created it. Metrics:
+///
+/// - `outbox_publish_total{type, result="ok"|"error"}`
+/// - `outbox_publish_duration_seconds{type}` (histogram)
+/// - `outbox_messages{status="STARTED"|"FAILED"}` and `outbox_oldest_started_age_seconds`
+///   (gauges of the whole table, refreshed every 15 s: every replica reports the same value)
 pub struct OutboxRelay<K: MessageKind> {
     repository: Arc<dyn OutboxRepository<K>>,
     publisher: Arc<dyn OutboxMessagePublisher<K>>,
@@ -36,30 +55,57 @@ impl<K: MessageKind> OutboxRelay<K> {
 
     /// Publishes one batch of pending messages and returns how many were published.
     pub fn process_batch(&self) -> anyhow::Result<usize> {
-        let messages = self
-            .repository
-            .find_by_status(OutboxStatus::Started, self.settings.batch_size)?;
+        self.process_batch_until(&Shutdown::new())
+    }
+
+    /// Like [`Self::process_batch`], but stops before the next message once `shutdown` is
+    /// triggered; the messages not reached yet are released for the next relay.
+    fn process_batch_until(&self, shutdown: &Shutdown) -> anyhow::Result<usize> {
+        let ClaimedBatch {
+            messages,
+            mut transaction,
+        } = self.repository.claim_batch(self.settings.batch_size)?;
         let mut published = 0;
 
         for message in messages {
-            match self.publisher.publish(&message) {
+            if shutdown.is_triggered() {
+                break;
+            }
+            let message_type = message.message_type().as_str();
+            let span = tracing::info_span!(
+                "outbox_publish",
+                message_id = %message.id(),
+                saga_id = %message.saga_id(),
+                message_type,
+                trace_id = Empty,
+                otel.name = format!("{message_type} publish"),
+                otel.kind = "producer",
+            );
+            trace_context::continue_trace(&span, message.trace_context());
+            let _span = span.entered();
+
+            let started = Instant::now();
+            let result = self.publisher.publish(&message);
+            metrics::histogram!("outbox_publish_duration_seconds", "type" => message_type)
+                .record(started.elapsed().as_secs_f64());
+            metrics::counter!(
+                "outbox_publish_total",
+                "type" => message_type,
+                "result" => if result.is_ok() { "ok" } else { "error" },
+            )
+            .increment(1);
+
+            match result {
                 Ok(()) => {
-                    self.repository.mark_completed(message.id())?;
+                    transaction.mark_completed(message.id())?;
                     published += 1;
-                    tracing::info!(
-                        "Outbox message {} ({}) published for saga {}",
-                        message.id(),
-                        message.message_type().as_str(),
-                        message.saga_id(),
-                    );
+                    tracing::info!("Outbox message published");
                 }
                 Err(error) => {
-                    let status = self
-                        .repository
+                    let status = transaction
                         .mark_attempt_failed(message.id(), self.settings.max_attempts)?;
                     tracing::error!(
-                        "Failed to publish outbox message {} (attempt {} of {}, now {}): {}",
-                        message.id(),
+                        "Failed to publish outbox message (attempt {} of {}, now {}): {}",
                         message.attempts() + 1,
                         self.settings.max_attempts,
                         status.as_str(),
@@ -69,21 +115,77 @@ impl<K: MessageKind> OutboxRelay<K> {
             }
         }
 
+        transaction.commit()?;
         Ok(published)
     }
 
-    /// Runs the relay on a dedicated thread, forever.
-    pub fn spawn(self) -> std::thread::JoinHandle<()> {
+    /// Deletes the `COMPLETED` messages older than the retention; returns how many.
+    pub fn delete_expired(&self) -> anyhow::Result<usize> {
+        let before = chrono::Utc::now()
+            - chrono::Duration::from_std(self.settings.retention).unwrap_or(chrono::Duration::MAX);
+        let mut deleted = 0;
+
+        loop {
+            let batch = self.repository.delete_completed(before, CLEANUP_BATCH)?;
+            deleted += batch;
+            if (batch as i64) < CLEANUP_BATCH {
+                return Ok(deleted);
+            }
+        }
+    }
+
+    /// Publishes the backlog gauges (see the type's documentation).
+    fn publish_backlog(&self) -> anyhow::Result<()> {
+        let backlog = self.repository.backlog()?;
+        let oldest_age = backlog
+            .oldest_started
+            .map(|at| (chrono::Utc::now() - at).as_seconds_f64().max(0.0))
+            .unwrap_or(0.0);
+
+        metrics::gauge!("outbox_messages", "status" => "STARTED").set(backlog.started as f64);
+        metrics::gauge!("outbox_messages", "status" => "FAILED").set(backlog.failed as f64);
+        metrics::gauge!("outbox_oldest_started_age_seconds").set(oldest_age);
+        Ok(())
+    }
+
+    /// Runs the relay on a dedicated thread until `shutdown` is triggered; it then finishes
+    /// the message being published, commits and exits.
+    pub fn spawn(self, shutdown: &Shutdown) -> std::thread::JoinHandle<()> {
+        let shutdown = shutdown.clone();
+
         std::thread::spawn(move || {
             tracing::info!(
                 "Outbox relay started, polling every {:?}",
                 self.settings.poll_interval
             );
+            let mut last_cleanup: Option<Instant> = None;
+            let mut last_backlog: Option<Instant> = None;
+
             loop {
-                if let Err(error) = self.process_batch() {
+                if let Err(error) = self.process_batch_until(&shutdown) {
                     tracing::error!("Outbox relay failed: {}", error);
                 }
-                std::thread::sleep(self.settings.poll_interval);
+
+                if last_cleanup.is_none_or(|at| at.elapsed() >= CLEANUP_INTERVAL) {
+                    last_cleanup = Some(Instant::now());
+                    match self.delete_expired() {
+                        Ok(0) => {}
+                        Ok(deleted) => tracing::info!("Deleted {deleted} old outbox messages"),
+                        Err(error) => tracing::error!("Outbox cleanup failed: {}", error),
+                    }
+                }
+
+                if last_backlog.is_none_or(|at| at.elapsed() >= BACKLOG_INTERVAL) {
+                    last_backlog = Some(Instant::now());
+                    if let Err(error) = self.publish_backlog() {
+                        tracing::warn!("Failed to read the outbox backlog: {}", error);
+                    }
+                }
+
+                if !shutdown.sleep(self.settings.poll_interval) {
+                    tracing::info!("Outbox relay stopped");
+                    return;
+                }
             }
         })
     }
@@ -92,8 +194,10 @@ impl<K: MessageKind> OutboxRelay<K> {
 #[cfg(all(test, feature = "mocks"))]
 mod tests {
     use super::*;
-    use crate::outbox::OutboxMessage;
-    use crate::outbox::ports::{MockOutboxMessagePublisher, MockOutboxRepository};
+    use crate::outbox::ports::{
+        MockOutboxBatchTransaction, MockOutboxMessagePublisher, MockOutboxRepository,
+    };
+    use crate::outbox::{OutboxMessage, OutboxStatus};
     use mockall::predicate::eq;
     use uuid::Uuid;
 
@@ -115,7 +219,25 @@ mod tests {
             poll_interval: Duration::from_millis(1),
             batch_size: 10,
             max_attempts: 3,
+            retention: Duration::from_secs(3600),
         }
+    }
+
+    fn claiming(
+        messages: Vec<OutboxMessage<Kind>>,
+        transaction: MockOutboxBatchTransaction,
+    ) -> MockOutboxRepository<Kind> {
+        let mut repository = MockOutboxRepository::<Kind>::new();
+        repository
+            .expect_claim_batch()
+            .with(eq(10))
+            .return_once(move |_| {
+                Ok(ClaimedBatch {
+                    messages,
+                    transaction: Box::new(transaction),
+                })
+            });
+        repository
     }
 
     #[test]
@@ -123,16 +245,14 @@ mod tests {
         let message = OutboxMessage::new(Uuid::new_v4(), Kind, &"payload")?;
         let id = message.id();
 
-        let mut repository = MockOutboxRepository::<Kind>::new();
-        repository
-            .expect_find_by_status()
-            .with(eq(OutboxStatus::Started), eq(10))
-            .return_once(move |_, _| Ok(vec![message]));
-        repository
+        let mut transaction = MockOutboxBatchTransaction::new();
+        transaction
             .expect_mark_completed()
             .with(eq(id))
             .times(1)
             .returning(|_| Ok(()));
+        transaction.expect_commit().times(1).returning(|| Ok(()));
+        let repository = claiming(vec![message], transaction);
         let mut publisher = MockOutboxMessagePublisher::<Kind>::new();
         publisher.expect_publish().times(1).returning(|_| Ok(()));
 
@@ -147,16 +267,15 @@ mod tests {
         let message = OutboxMessage::new(Uuid::new_v4(), Kind, &"payload")?;
         let id = message.id();
 
-        let mut repository = MockOutboxRepository::<Kind>::new();
-        repository
-            .expect_find_by_status()
-            .return_once(move |_, _| Ok(vec![message]));
-        repository
+        let mut transaction = MockOutboxBatchTransaction::new();
+        transaction
             .expect_mark_attempt_failed()
             .with(eq(id), eq(3))
             .times(1)
             .returning(|_, _| Ok(OutboxStatus::Started));
-        repository.expect_mark_completed().never();
+        transaction.expect_mark_completed().never();
+        transaction.expect_commit().times(1).returning(|| Ok(()));
+        let repository = claiming(vec![message], transaction);
         let mut publisher = MockOutboxMessagePublisher::<Kind>::new();
         publisher
             .expect_publish()
@@ -165,6 +284,56 @@ mod tests {
         let relay = OutboxRelay::new(Arc::new(repository), Arc::new(publisher), settings());
 
         assert_eq!(0, relay.process_batch()?);
+        Ok(())
+    }
+
+    #[test]
+    fn stops_before_the_next_message_on_shutdown() -> anyhow::Result<()> {
+        let messages = vec![
+            OutboxMessage::new(Uuid::new_v4(), Kind, &"first")?,
+            OutboxMessage::new(Uuid::new_v4(), Kind, &"second")?,
+        ];
+        let shutdown = Shutdown::new();
+
+        let mut transaction = MockOutboxBatchTransaction::new();
+        transaction
+            .expect_mark_completed()
+            .times(1)
+            .returning(|_| Ok(()));
+        transaction.expect_commit().times(1).returning(|| Ok(()));
+        let repository = claiming(messages, transaction);
+        let mut publisher = MockOutboxMessagePublisher::<Kind>::new();
+        let trigger = shutdown.clone();
+        publisher.expect_publish().times(1).returning(move |_| {
+            trigger.trigger();
+            Ok(())
+        });
+
+        let relay = OutboxRelay::new(Arc::new(repository), Arc::new(publisher), settings());
+
+        assert_eq!(1, relay.process_batch_until(&shutdown)?);
+        Ok(())
+    }
+
+    #[test]
+    fn deletes_expired_messages_in_batches() -> anyhow::Result<()> {
+        let mut repository = MockOutboxRepository::<Kind>::new();
+        let mut calls = 0;
+        repository
+            .expect_delete_completed()
+            .times(2)
+            .returning(move |_, limit| {
+                calls += 1;
+                Ok(if calls == 1 { limit as usize } else { 7 })
+            });
+
+        let relay = OutboxRelay::new(
+            Arc::new(repository),
+            Arc::new(MockOutboxMessagePublisher::<Kind>::new()),
+            settings(),
+        );
+
+        assert_eq!(CLEANUP_BATCH as usize + 7, relay.delete_expired()?);
         Ok(())
     }
 }

@@ -4,15 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-env_logger.workspace = true
 actix-web.workspace = true
 tracing.workspace = true
-tracing-actix-web.workspace = true
 anyhow.workspace = true
 dotenv.workspace = true
 utoipa-actix-web.workspace = true
 utoipa-swagger-ui.workspace = true
-shared = { workspace = true, features = ["db", "kafka", "web"] }
+shared = { workspace = true, features = ["db", "kafka", "web", "observability"] }
 
 application = { path = "../application" }
 presentation = { path = "../presentation" }

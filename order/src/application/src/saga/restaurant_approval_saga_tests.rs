@@ -54,6 +54,7 @@ fn test_restaurant_approved_moves_order_to_approved_and_requests_payment() -> an
                 saga_id,
                 order_id,
                 SagaStatus::Started,
+                chrono::Utc::now(),
             )))
         });
 
@@ -111,6 +112,7 @@ fn test_restaurant_rejected_cancels_order_and_fails_saga_without_compensation() 
                 saga_id,
                 order_id,
                 SagaStatus::Started,
+                chrono::Utc::now(),
             )))
         });
 
@@ -157,6 +159,7 @@ fn test_duplicate_restaurant_reply_is_ignored() -> anyhow::Result<()> {
                 saga_id,
                 order_id,
                 SagaStatus::Processing,
+                chrono::Utc::now(),
             )))
         });
     mock_order_repository.expect_find_by_id().never();
@@ -215,6 +218,7 @@ fn test_reply_for_another_order_is_an_error() {
                 saga_id,
                 saga_order_id,
                 SagaStatus::Started,
+                chrono::Utc::now(),
             )))
         });
     mock_order_repository.expect_find_by_id().never();

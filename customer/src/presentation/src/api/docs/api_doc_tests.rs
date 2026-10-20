@@ -7,7 +7,7 @@ const EXPECTED: &[(&str, &str, &[&str])] = &[
     ("/api/customers/{id}", "put", &["200", "400", "500"]),
     ("/api/health/startup", "get", &["200"]),
     ("/api/health/live", "get", &["200"]),
-    ("/api/health/ready", "get", &["200"]),
+    ("/api/health/ready", "get", &["200", "503"]),
     ("/api/info", "get", &["200", "500"]),
 ];
 

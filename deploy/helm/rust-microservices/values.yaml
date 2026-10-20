@@ -1,0 +1,179 @@
+# Production-like defaults. values-kind.yaml / values-lab.yaml override per target.
+
+global:
+  image:
+    registry: ""          # e.g. registry.lab.internal; empty = Docker Hub
+    namespace: artellas
+    tag: latest
+    pullPolicy: IfNotPresent
+  environment: production
+  # Kafka bootstrap address used by the services: <kafka.name>-kafka-bootstrap:9092.
+  kafkaBootstrap: kafka-kafka-bootstrap:9092
+  # OTLP/HTTP endpoint the services send their traces to (the node's Alloy agent, see
+  # deploy/platform/alloy); empty = no traces. `sampleRatio` of the new traces are kept.
+  tracing:
+    endpoint: http://alloy.monitoring:4318
+    sampleRatio: "1.0"
+  # KEDA's requests/s triggers (autoscaling.keda.requestsPerSecond) query this Prometheus.
+  autoscaling:
+    prometheusUrl: http://kube-prometheus-stack-prometheus.monitoring:9090
+
+# PodMonitors for the CloudNativePG clusters and Kafka, Kafka's own metrics and the
+# kafka-exporter (consumer lag). The services' ServiceMonitors: `metrics` of each service.
+metrics:
+  enabled: true
+
+kafka:
+  # Strimzi Kafka cluster name; clients use <name>-kafka-bootstrap:9092.
+  name: kafka
+  version: 4.3.1
+  storageSize: 10Gi
+  partitions: 12
+  # Exposes the broker outside the cluster on fixed NodePorts (kind: mapped to the host).
+  external:
+    enabled: false
+    advertisedHost: localhost
+    bootstrapNodePort: 30093
+    brokerNodePort: 30094
+    advertisedPort: 9094
+    # Run the broker on the node whose NodePorts are reachable (kind: the ingress-ready worker).
+    nodeSelector: {}
+  # Every topic exchanged between the services (shared::contracts::topics).
+  topics:
+    - customer-created
+    - customer-updated
+    - product-created
+    - product-updated
+    - product-deleted
+    - payment-created
+    - payment-updated
+    - restaurant-approval-request
+    - restaurant-approval-response
+    - restaurant-approval-cancel-request
+    - payment-request
+    - payment-response
+  # Topics somebody consumes get a `<topic>.dlq` dead letter topic.
+  deadLetterTopics:
+    - customer-created
+    - customer-updated
+    - product-created
+    - product-updated
+    - product-deleted
+    - restaurant-approval-request
+    - restaurant-approval-response
+    - restaurant-approval-cancel-request
+    - payment-request
+    - payment-response
+
+postgres:
+  # One CloudNativePG cluster `<service>-db` (+ pooler `<service>-db-pooler`) per service.
+  clusters: [catalog, customer, order, restaurant, payment]
+  instances: 1
+  storageSize: 5Gi
+  pooler:
+    instances: 1
+    # Session mode: the services use prepared statements (diesel) and a session advisory lock
+    # around migrations. The pooler still bounds the server-side connections.
+    poolMode: session
+    maxClientConnections: 200
+    defaultPoolSize: 40
+
+gateway:
+  enabled: true
+  className: envoy
+  # Empty = any hostname (kind: localhost).
+  hostname: ""
+  # Attach the route to an existing Gateway instead of creating `shop`, e.g. the homelab's shared
+  # HTTPS Gateway: {name: lab, namespace: envoy-gateway-system, sectionName: https}.
+  parentRef: {}
+  # Also route /direct/<service>/... straight to each service (without the api-gateway), to
+  # benchmark the gateway hop.
+  directRoutes: false
+
+# KEDA (deploy/platform/keda) scales every service on CPU, the saga's consumers also on their
+# Kafka consumer lag and the gateway on its requests/s. Without KEDA: a CPU HorizontalPodAutoscaler.
+x-keda: &keda
+  enabled: true
+
+# Shared by the services (templated with `tpl`).
+x-common-env: &common-env
+  ENVIRONMENT: "{{ .Values.global.environment }}"
+  KAFKA_HOST: "{{ .Values.global.kafkaBootstrap }}"
+  RUST_LOG: info
+  LOG_FORMAT: json
+  OTEL_EXPORTER_OTLP_ENDPOINT: "{{ .Values.global.tracing.endpoint }}"
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "{{ .Values.global.tracing.sampleRatio }}"
+
+catalog:
+  port: 8080
+  env:
+    <<: *common-env
+    SERVICE_NAME: catalog_api
+  database: {enabled: true, cluster: catalog-db}
+  autoscaling:
+    keda: *keda
+
+customer:
+  port: 8082
+  env:
+    <<: *common-env
+    SERVICE_NAME: customer_api
+  database: {enabled: true, cluster: customer-db}
+  autoscaling:
+    keda: *keda
+
+order:
+  port: 8081
+  env:
+    <<: *common-env
+    SERVICE_NAME: order_api
+    KAFKA_GROUP_ID: order-service-group
+  database: {enabled: true, cluster: order-db}
+  autoscaling:
+    keda:
+      <<: *keda
+      kafka: {consumerGroup: order-service-group}
+
+restaurant:
+  port: 8083
+  env:
+    <<: *common-env
+    SERVICE_NAME: restaurant_api
+  database: {enabled: true, cluster: restaurant-db}
+  autoscaling:
+    keda:
+      <<: *keda
+      kafka: {consumerGroup: restaurant-service-group}
+
+payment:
+  port: 8084
+  env:
+    <<: *common-env
+    SERVICE_NAME: payment_api
+  database: {enabled: true, cluster: payment-db}
+  autoscaling:
+    keda:
+      <<: *keda
+      kafka: {consumerGroup: payment-service-group}
+
+api-gateway:
+  port: 8070
+  env:
+    RUST_LOG: info
+    LOG_FORMAT: json
+    OTEL_EXPORTER_OTLP_ENDPOINT: "{{ .Values.global.tracing.endpoint }}"
+    OTEL_TRACES_SAMPLER: parentbased_traceidratio
+    OTEL_TRACES_SAMPLER_ARG: "{{ .Values.global.tracing.sampleRatio }}"
+    MICROSERVICE_CATALOG_URL: http://catalog:8080
+    MICROSERVICE_CUSTOMER_URL: http://customer:8082
+    MICROSERVICE_ORDER_URL: http://order:8081
+    MICROSERVICE_RESTAURANT_URL: http://restaurant:8083
+    MICROSERVICE_PAYMENT_URL: http://payment:8084
+  probes:
+    # The gateway has no startup endpoint.
+    startupPath: /api/health/live
+  autoscaling:
+    keda:
+      <<: *keda
+      requestsPerSecond: {threshold: 500}

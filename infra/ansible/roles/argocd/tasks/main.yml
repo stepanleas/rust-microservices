@@ -1,0 +1,106 @@
+# GitOps on the lab: everything else in the cluster comes from git through Argo CD (deploy/argocd).
+# This role only writes what can't be in git, installs Argo CD once, and creates the root
+# Application. Runs on the Ansible host.
+- name: Namespaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    kind: Namespace
+    name: "{{ item }}"
+  loop: ["{{ argocd_namespace }}", envoy-gateway-system, monitoring]
+
+# The lab CA and wildcard certificate are generated per lab (roles/lab_ca), so they are copied in
+# from ~/.lab/ca, here and again after every renewal.
+- name: Wildcard certificate for the lab Gateway
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: kubernetes.io/tls
+      metadata:
+        name: lab-wildcard-tls
+        namespace: envoy-gateway-system
+      data:
+        tls.crt: "{{ lookup('file', lab_ca_dir ~ '/wildcard.crt') | b64encode }}"
+        tls.key: "{{ lookup('file', lab_ca_dir ~ '/wildcard.key') | b64encode }}"
+  no_log: true
+
+- name: Argo CD trusts the lab CA for git.{{ lab_domain }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: argocd-tls-certs-cm
+        namespace: "{{ argocd_namespace }}"
+        labels:
+          app.kubernetes.io/name: argocd-tls-certs-cm
+          app.kubernetes.io/part-of: argocd
+      # Keys are hostnames; Ansible doesn't template mapping keys, hence the expression.
+      data: "{{ {'git.' ~ lab_domain: lookup('file', lab_ca_dir ~ '/ca.crt') ~ '\n'} }}"
+
+- name: Prometheus and Alertmanager trust the lab CA (ops VM targets, ntfy)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: lab-ca
+        namespace: monitoring
+      data:
+        ca.crt: "{{ lookup('file', lab_ca_dir ~ '/ca.crt') ~ '\n' }}"
+
+# Installed only once: afterwards the argo-cd Application (deploy/argocd) manages this release.
+- name: Argo CD release
+  kubernetes.core.helm_info:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    name: argo-cd
+    release_namespace: "{{ argocd_namespace }}"
+  register: argocd_release
+
+- name: Install Argo CD {{ argocd_chart.version }}
+  kubernetes.core.helm:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    name: argo-cd
+    chart_ref: "{{ argocd_chart.chart }}"
+    chart_repo_url: "{{ argocd_chart.repo }}"
+    chart_version: "{{ argocd_chart.version }}"
+    release_namespace: "{{ argocd_namespace }}"
+    values_files: ["{{ argocd_repo_root }}/deploy/platform/argo-cd/values.yaml"]
+    # The Gateway API CRDs come with Envoy Gateway, which Argo CD installs: the route is added
+    # when the argo-cd Application takes this release over.
+    # The first install also needs the redis-secret-init hook that the values turn off.
+    values:
+      server: {httproute: {enabled: false}}
+      redisSecretInit: {enabled: true}
+    wait: true
+    wait_timeout: 10m
+  when: argocd_release.status is not defined
+
+- name: Root Application (deploy/argocd at {{ argocd_revision }})
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lab_kubeconfig }}"
+    definition:
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: root
+        namespace: "{{ argocd_namespace }}"
+      spec:
+        project: default
+        destination:
+          server: https://kubernetes.default.svc
+          namespace: "{{ argocd_namespace }}"
+        source:
+          repoURL: "{{ argocd_repo_url }}"
+          targetRevision: "{{ argocd_revision }}"
+          path: deploy/argocd
+          helm:
+            valuesObject:
+              repoURL: "{{ argocd_repo_url }}"
+              revision: "{{ argocd_revision }}"
+              envRepoURL: "{{ argocd_env_repo_url }}"
+        syncPolicy:
+          automated: {prune: true, selfHeal: true}

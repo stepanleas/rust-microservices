@@ -1,0 +1,7 @@
+<!-- Managed by Ansible (lab_host role). -->
+<network>
+  <name>{{ lab.network.name }}</name>
+  <bridge name="{{ lab.network.bridge }}" stp="on" delay="0"/>
+  <dns enable="no"/>
+  <ip address="{{ lab.network.host_ip }}" netmask="{{ lab.network.cidr | ansible.utils.ipaddr('netmask') }}"/>
+</network>

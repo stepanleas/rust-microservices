@@ -1,0 +1,8 @@
+- name: Lab CA
+  hosts: localhost
+  roles: [lab_ca]
+
+- name: Baseline of every VM
+  hosts: lab
+  become: true
+  roles: [common]

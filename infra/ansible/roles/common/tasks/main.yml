@@ -1,0 +1,82 @@
+# Baseline for every VM: packages, time, kernel settings, lab CA and lab DNS.
+- name: Wait for cloud-init (first boot runs apt in the background)
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  failed_when: false
+
+- name: Base packages
+  ansible.builtin.apt:
+    name: [apt-transport-https, ca-certificates, chrony, conntrack, curl, gnupg, jq, socat]
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: Trust the lab CA
+  ansible.builtin.copy:
+    src: "{{ lab_ca_dir }}/ca.crt"
+    dest: /usr/local/share/ca-certificates/rust-microservices-lab-ca.crt
+    mode: "0644"
+  notify: Update CA certificates
+
+# Global DNS with a routing domain: only *.lab.internal goes to dnsmasq on the ops VM.
+# Ubuntu cloud images don't ship the drop-in directory.
+- name: Drop-in directory for systemd-resolved
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Resolve lab names through the ops VM
+  ansible.builtin.template:
+    src: resolved-lab.conf.j2
+    dest: /etc/systemd/resolved.conf.d/lab.conf
+    mode: "0644"
+  notify: Restart systemd-resolved
+
+- name: Swap off now
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+  changed_when: true
+
+- name: Swap off at boot
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+- name: Kernel modules at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/lab.conf
+    content: |
+      overlay
+      br_netfilter
+    mode: "0644"
+
+- name: Kernel modules now
+  community.general.modprobe:
+    name: "{{ item }}"
+  loop: [overlay, br_netfilter]
+
+- name: Sysctls (forwarding for pods/containers, inotify for many pods, mmap for Kafka)
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-lab.conf
+  loop: "{{ sysctls | dict2items }}"
+  vars:
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.bridge.bridge-nf-call-iptables: 1
+      net.bridge.bridge-nf-call-ip6tables: 1
+      fs.inotify.max_user_instances: 8192
+      fs.inotify.max_user_watches: 524288
+      vm.max_map_count: 262144
+
+- name: Chrony running
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+
+- name: Lab facts
+  ansible.builtin.import_tasks: facts.yml

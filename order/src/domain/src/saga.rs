@@ -1,4 +1,5 @@
 use crate::error::DomainError;
+use chrono::{DateTime, Utc};
 use shared::domain::value_objects::OrderId;
 use uuid::Uuid;
 
@@ -50,6 +51,7 @@ pub struct OrderSaga {
     id: Uuid,
     order_id: OrderId,
     status: SagaStatus,
+    started_at: DateTime<Utc>,
 }
 
 impl OrderSaga {
@@ -59,15 +61,22 @@ impl OrderSaga {
             id: Uuid::new_v4(),
             order_id,
             status: SagaStatus::Started,
+            started_at: Utc::now(),
         }
     }
 
     /// Rebuilds a saga from persisted state.
-    pub fn restore(id: Uuid, order_id: OrderId, status: SagaStatus) -> Self {
+    pub fn restore(
+        id: Uuid,
+        order_id: OrderId,
+        status: SagaStatus,
+        started_at: DateTime<Utc>,
+    ) -> Self {
         Self {
             id,
             order_id,
             status,
+            started_at,
         }
     }
 
@@ -81,6 +90,10 @@ impl OrderSaga {
 
     pub fn status(&self) -> SagaStatus {
         self.status
+    }
+
+    pub fn started_at(&self) -> DateTime<Utc> {
+        self.started_at
     }
 
     /// The restaurant approved the order, the saga moves on to the payment step.

@@ -35,7 +35,12 @@ fn test_every_route_is_documented_with_its_responses() -> anyhow::Result<()> {
         ),
         ("/api/health/startup", "get", "health_startup", vec!["200"]),
         ("/api/health/live", "get", "health_live", vec!["200"]),
-        ("/api/health/ready", "get", "health_ready", vec!["200"]),
+        (
+            "/api/health/ready",
+            "get",
+            "health_ready",
+            vec!["200", "503"],
+        ),
         ("/api/info", "get", "app_info", vec!["200", "500"]),
     ];
 

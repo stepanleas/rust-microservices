@@ -1,0 +1,53 @@
+{{- if .Values.lab.enabled }}
+{{- $domain := .Values.lab.domain }}
+# The ops VM (infra/ansible): its node-exporter and the /metrics of its services, so one
+# Grafana shows the apps and the infrastructure.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: ops-node-exporter
+spec:
+  staticConfigs:
+    - targets: [{{ .Values.lab.opsNodeExporter | quote }}]
+  # Same `instance` naming as the cluster nodes (the node name).
+  relabelings:
+    - targetLabel: instance
+      replacement: ops
+---
+# Zot (registry and docker.io mirror), Forgejo and ntfy, through Caddy's HTTPS (lab CA).
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: ops-services
+spec:
+  scheme: HTTPS
+  metricsPath: /metrics
+  tlsConfig:
+    ca:
+      configMap: {name: lab-ca, key: ca.crt}
+  staticConfigs:
+    - targets: ["registry.{{ $domain }}"]
+      labels: {service: zot}
+    - targets: ["mirror.{{ $domain }}"]
+      labels: {service: zot-mirror}
+    - targets: ["git.{{ $domain }}"]
+      labels: {service: forgejo}
+    - targets: ["ntfy.{{ $domain }}"]
+      labels: {service: ntfy}
+---
+# The ops VM's Alloy pushes its journald and container logs to Loki through the lab Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: loki-push
+spec:
+  parentRefs:
+    - {name: lab, namespace: envoy-gateway-system, sectionName: https}
+  hostnames: ["loki.{{ $domain }}"]
+  rules:
+    - matches:
+        - path: {type: Exact, value: /loki/api/v1/push}
+      backendRefs:
+        - name: loki
+          port: 3100
+{{- end }}

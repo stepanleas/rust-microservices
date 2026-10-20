@@ -2,6 +2,9 @@
 //! defaults the Spring gateway used: once the sliding window is full and the
 //! failure rate reaches the threshold, the circuit opens; after the wait it lets
 //! a few trial calls through (half-open) and closes again only if they succeed.
+//!
+//! The state is published as `gateway_circuit_breaker_state{breaker}`: 0 closed,
+//! 1 half-open, 2 open.
 
 use std::{
     collections::VecDeque,
@@ -25,6 +28,16 @@ enum State {
     HalfOpen { started: usize },
 }
 
+impl State {
+    fn metric_value(&self) -> f64 {
+        match self {
+            State::Closed => 0.0,
+            State::HalfOpen { .. } => 1.0,
+            State::Open { .. } => 2.0,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Inner {
     state: State,
@@ -41,14 +54,21 @@ pub struct CircuitBreaker {
 
 impl CircuitBreaker {
     pub fn new(name: impl Into<String>, config: CircuitBreakerConfig) -> Self {
-        Self {
+        let breaker = Self {
             name: name.into(),
             config,
             inner: Mutex::new(Inner {
                 state: State::Closed,
                 outcomes: VecDeque::new(),
             }),
-        }
+        };
+        breaker.publish(&State::Closed);
+        breaker
+    }
+
+    fn publish(&self, state: &State) {
+        metrics::gauge!("gateway_circuit_breaker_state", "breaker" => self.name.clone())
+            .set(state.metric_value());
     }
 
     /// Returns `None` when the call must be short-circuited.
@@ -68,6 +88,7 @@ impl CircuitBreaker {
                 tracing::info!(breaker = %self.name, "circuit half-open");
                 inner.state = State::HalfOpen { started: 1 };
                 inner.outcomes.clear();
+                self.publish(&inner.state);
                 true
             }
             State::HalfOpen { ref mut started } => {
@@ -116,10 +137,12 @@ impl CircuitBreaker {
                 until: now + self.config.wait_duration_in_open,
             };
             inner.outcomes.clear();
+            self.publish(&inner.state);
         } else if matches!(inner.state, State::HalfOpen { .. }) {
             tracing::info!(breaker = %self.name, "circuit closed");
             inner.state = State::Closed;
             inner.outcomes.clear();
+            self.publish(&inner.state);
         }
     }
 }

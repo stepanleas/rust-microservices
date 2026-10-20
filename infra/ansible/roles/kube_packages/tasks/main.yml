@@ -1,0 +1,41 @@
+# kubelet, kubeadm and kubectl pinned to kubernetes_version and held, so apt upgrades never move
+# them. Upgrades go through playbooks/upgrade-kubernetes.yml.
+- name: Kubernetes apt repository (one per minor version)
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor }}/deb/"
+    suites: /
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor }}/deb/Release.key"
+  register: kube_repo
+
+- name: Refresh apt after a repository change  # noqa: no-handler (needed before the install below)
+  ansible.builtin.apt:
+    update_cache: true
+    lock_timeout: 300
+  when: kube_repo.changed
+
+- name: Packages
+  ansible.builtin.apt:
+    name: "{{ kube_packages_installed | map('regex_replace', '$', '=' ~ kube_package_version) }}"
+    allow_change_held_packages: true
+    lock_timeout: 300
+
+- name: Hold
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ kube_packages_installed }}"
+
+# Pods (through CoreDNS) resolve everything via dnsmasq on the ops VM, so lab names work in the
+# cluster too. The node's resolv.conf would mix in the NAT network's resolver.
+- name: Resolver for pods
+  ansible.builtin.copy:
+    dest: /etc/kubernetes/resolv.conf
+    content: "nameserver {{ lab_ops_ip }}\n"
+    mode: "0644"
+
+- name: kubelet enabled
+  ansible.builtin.service:
+    name: kubelet
+    enabled: true

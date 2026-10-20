@@ -53,7 +53,14 @@ fn saga_in(
 
     mock_saga_repository
         .expect_find_by_id()
-        .returning(move |_| Ok(Some(OrderSaga::restore(saga_id, order_id, status))));
+        .returning(move |_| {
+            Ok(Some(OrderSaga::restore(
+                saga_id,
+                order_id,
+                status,
+                chrono::Utc::now(),
+            )))
+        });
     mock_order_repository
         .expect_find_by_id()
         .returning(move |_| Ok(Some(approved_order(order_id, product_id)?)));

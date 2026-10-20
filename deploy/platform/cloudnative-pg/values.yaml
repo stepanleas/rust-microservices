@@ -1,0 +1,2 @@
+# CloudNativePG operator: one Postgres `Cluster` (+ PgBouncer `Pooler`) per service.
+# The clusters themselves are in the rust-microservices chart.

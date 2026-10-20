@@ -1,0 +1,2 @@
+# Envoy Gateway: implements the Gateway API. The GatewayClass/EnvoyProxy per target are in
+# deploy/platform/envoy-gateway/<target>/; the Gateway and HTTPRoute in the rust-microservices chart.

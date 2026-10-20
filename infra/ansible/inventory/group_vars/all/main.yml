@@ -1,0 +1,39 @@
+# Versions and settings shared by every play. Topology (names, IPs, sizes) comes from
+# infra/lab.yml through the inventory as `lab`.
+lab_domain: "{{ lab.domain }}"
+lab_dir: "{{ lookup('env', 'HOME') }}/.lab"
+lab_ca_dir: "{{ lab_dir }}/ca"
+lab_kubeconfig: "{{ lookup('env', 'HOME') }}/.kube/lab.yaml"
+lab_ops_ip: "{{ hostvars[groups['ops_vm'][0]].lab_ip }}"
+lab_cp_ip: "{{ hostvars[groups['control_plane'][0]].lab_ip }}"
+
+# Kubernetes (pkgs.k8s.io publishes one apt repository per minor version).
+kubernetes_version: 1.37.1
+kubernetes_package_revision: "1.1"
+kubernetes_pod_subnet: 10.244.0.0/16
+kubernetes_service_subnet: 10.96.0.0/12
+containerd_version: 2.4.1
+runc_version: 1.5.2
+cilium_version: 1.20.2
+kubelet_csr_approver_version: 1.2.15
+
+# Services on the ops VM (Docker images).
+caddy_image: caddy:2.11.7
+zot_image: ghcr.io/project-zot/zot:v2.1.22
+forgejo_image: data.forgejo.org/forgejo/forgejo:16.0.5
+forgejo_runner_image: data.forgejo.org/forgejo/runner:13.2.0
+forgejo_runner_job_image: ghcr.io/catthehacker/ubuntu:act-24.04
+ntfy_image: binwiederhier/ntfy:v2.29.0
+node_exporter_image: prom/node-exporter:v1.12.1
+alloy_image: grafana/alloy:v1.20.1
+
+# Names served by the ops VM; every other *.lab.internal name points at the ingress IP.
+ops_hostnames: [ops, git, registry, mirror, ntfy]
+forgejo_url: "https://git.{{ lab_domain }}"
+forgejo_admin_user: lab-admin
+forgejo_org: shop
+forgejo_repo: rust-microservices
+# The lab's deploy state (image tags) for Argo CD, written by the release workflow.
+forgejo_env_repo: lab-env
+# Pushes to the lab registry. Forgejo masks secret values in job logs, so not a common word.
+registry_ci_user: forgejo-ci

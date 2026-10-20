@@ -18,11 +18,12 @@ use infrastructure::postgres::{
     PostgresProductRepository,
 };
 use messaging::handlers::OrderMessageHandler;
-use messaging::publishers::{OutboxKafkaPublisher, PUBLISHED_TOPICS};
+use messaging::publishers::OutboxKafkaPublisher;
 use presentation::state::AppState;
 use shared::kafka::{KafkaProducer, RetryPolicy};
 use shared::outbox::postgres::PostgresOutboxRepository;
 use shared::outbox::relay::{OutboxRelay, RelaySettings};
+use shared::shutdown::Shutdown;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -84,17 +85,25 @@ impl UseCases {
     }
 }
 
-/// Consumes every topic of the order service on a dedicated thread, forever.
+/// Consumes every topic of the order service on a dedicated thread until `shutdown`.
 pub fn start_kafka_listener(
     kafka_host: &str,
     group_id: &str,
     handler: OrderMessageHandler,
+    shutdown: &Shutdown,
 ) -> JoinHandle<()> {
     let hosts = vec![kafka_host.to_string()];
     let group_id = group_id.to_string();
+    let shutdown = shutdown.clone();
 
     std::thread::spawn(move || {
-        shared::kafka::listen(hosts, group_id, Arc::new(handler), RetryPolicy::default())
+        shared::kafka::listen(
+            hosts,
+            group_id,
+            Arc::new(handler),
+            RetryPolicy::default(),
+            &shutdown,
+        )
     })
 }
 
@@ -104,10 +113,7 @@ pub fn outbox_relay(
     kafka_host: &str,
     settings: RelaySettings,
 ) -> OutboxRelay<OutboxMessageType> {
-    let publisher = OutboxKafkaPublisher::new(KafkaProducer::new(
-        vec![kafka_host.to_string()],
-        &PUBLISHED_TOPICS,
-    ));
+    let publisher = OutboxKafkaPublisher::new(KafkaProducer::new(vec![kafka_host.to_string()]));
 
     OutboxRelay::new(
         Arc::new(PostgresOutboxRepository::<OutboxMessageType>::new(pool)),

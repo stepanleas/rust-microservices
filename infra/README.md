@@ -9,7 +9,7 @@ real machines.
 
 | VM | IP | vCPU / RAM / disk | Runs |
 |---|---|---|---|
-| `ops` | 192.168.56.10 | 4 / 6 GB / 80 GB | dnsmasq, Caddy (TLS), Zot registry + docker.io cache, Forgejo + Actions runner, ntfy, node-exporter |
+| `ops` | 192.168.56.10 | 4 / 6 GB / 80 GB | dnsmasq, Caddy (TLS), Zot registry + docker.io cache, Forgejo + Actions runner, ntfy, node-exporter, Alloy |
 | `k8s-cp` | .11 | 2 / 4 GB / 30 GB | kubeadm control plane (tainted: no workloads) |
 | `k8s-w1`, `k8s-w2` | .12, .13 | 4 / 6.5 GB / 60 GB | workloads |
 | LoadBalancer pool | .200–.220 | | Cilium LB-IPAM, announced over ARP; `.200` is the cluster ingress |
@@ -30,7 +30,7 @@ node containers): both together don't fit in 31 GB.
 |---|---|
 | This machine (sudo, `make lab_host`) | libvirt, Vagrant + vagrant-libvirt, the isolated `lab` network (bridge `virbr-lab`), split DNS for `lab.internal` through systemd-resolved, lab CA in the system store and in Chrome/Firefox |
 | Every VM | apt baseline, chrony, swap off, kernel modules and sysctls, lab CA trusted, `*.lab.internal` resolved by the ops VM |
-| ops | dnsmasq; Docker; Caddy with the lab wildcard certificate; Zot; Forgejo (admin user, org `shop`, repo `rust-microservices`, Actions on); runner registered offline with a shared secret; ntfy; node-exporter |
+| ops | dnsmasq; Docker; Caddy with the lab wildcard certificate; Zot; Forgejo (admin user, org `shop`, repo `rust-microservices`, Actions on); runner registered offline with a shared secret; ntfy; node-exporter (plus the lab certificates' expiry and the CI runner's state as textfile metrics); Alloy shipping journald and container logs to Loki |
 | Kubernetes nodes | containerd + runc from upstream releases, image pulls through Zot; kubelet/kubeadm/kubectl pinned and held; `kubeadm init` from a versioned config (no kube-proxy, metrics endpoints open, kubelet serving certificates); workers joined; Cilium; kubelet-csr-approver; LoadBalancer IP pool + L2 policy |
 | Day 2 | rolling Kubernetes upgrades, certificate renewal, cluster reset, backups |
 
@@ -141,7 +141,7 @@ infra/
     ├── playbooks/                     host, common, ops, kubernetes, argocd, upgrade-kubernetes,
     │                                  renew-certs, reset, backup
     └── roles/                         one per concern (lab_ca, common, dnsmasq, docker, caddy, zot,
-                                       forgejo, forgejo_runner, ntfy, node_exporter, containerd,
+                                       forgejo, forgejo_runner, ntfy, node_exporter, alloy, containerd,
                                        kube_packages, kubeadm_control_plane, kubeadm_worker,
                                        cilium, lab_kubeconfig, argocd, lab_host, lab_host_user)
 ```

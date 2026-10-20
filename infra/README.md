@@ -75,7 +75,7 @@ Then:
 | `make lab_status` | VM states and nodes |
 | `make lab_provision` | re-apply the configuration (after editing `lab.yml`, versions or roles) |
 | `make lab_ssh VM=k8s-w1` | shell on a VM |
-| `make lab_quiet` / `lab_unquiet` | stop/start the CI runner, e.g. during load tests |
+| `make lab_quiet` / `lab_unquiet` | stop/start the CI runner, e.g. during load tests (`LabCiRunnerOffline` ignores such a pause for 3 h) |
 | `make lab_snapshot NAME=x` / `lab_restore NAME=x` | VM snapshots before risky experiments |
 | `make lab_k8s_upgrade VERSION=1.37.1` | bumps `kubernetes_version` and upgrades: control plane, then each worker (drain → upgrade → uncordon). One minor version at a time |
 | `make lab_renew_certs` | renews kubeadm's certificates (they expire after a year; upgrades also renew them) |

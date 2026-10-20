@@ -44,7 +44,8 @@ A run fails (exit code 99) when a threshold breaks (`k6/lib/thresholds.js`):
 
 * `http_req_failed` < 1%
 * p95 < 500 ms for reads, < 1 s for order placements
-* `dropped_iterations` = 0: k6 kept up with the target rate
+* `dropped_iterations` = 0: k6 kept up with the target rate (`stress` and `PROFILE=max`, which stop at
+  the first broken threshold: under 1 dropped iteration per second)
 * `saga_timeouts` = 0: every sampled saga finished within `SAGA_TIMEOUT_S`
 
 `make load_verify` (`scripts/verify.sh`) then checks the end state once the sagas drained:

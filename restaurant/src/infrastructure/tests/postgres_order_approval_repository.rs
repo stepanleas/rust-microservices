@@ -247,7 +247,11 @@ async fn test_save_approval_rolls_back_when_the_stock_was_taken_meanwhile() -> a
 
     assert!(result.is_err());
     assert_eq!(2, quantity(&pool, product_id)?);
-    assert!(approval_repository.find_by_order_id(late.order_id())?.is_none());
+    assert!(
+        approval_repository
+            .find_by_order_id(late.order_id())?
+            .is_none()
+    );
     assert_eq!(
         1,
         outbox_repository

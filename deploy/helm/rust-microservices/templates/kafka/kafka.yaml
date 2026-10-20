@@ -71,16 +71,11 @@ spec:
       num.partitions: {{ $kafka.partitions }}
       group.initial.rebalance.delay.ms: 0
     {{- if $.Values.metrics.enabled }}
-    # Broker metrics in the Prometheus format on port 9404 (PodMonitor `kafka`).
+    # Broker metrics in the Prometheus format on port 9404 (PodMonitor `kafka`). No `allowList`:
+    # Strimzi sets it as a dynamic broker config that Kafka reads back as sensitive (null), so every
+    # reconciliation re-applied it, and when that failed under load Strimzi rolled the only broker.
     metricsConfig:
       type: strimziMetricsReporter
-      values:
-        allowList:
-          - "kafka_server_.*"
-          - "kafka_network_.*"
-          - "kafka_log_.*"
-          - "kafka_controller_.*"
-          - "kafka_coordinator_group_.*"
   # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics), without
   # Kafka's internal topics (__consumer_offsets: 50 partitions nobody alerts on).
   kafkaExporter:

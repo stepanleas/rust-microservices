@@ -1,6 +1,6 @@
 use crate::commands::ApproveOrderCommand;
 use crate::outbox::restaurant_approval_response;
-use crate::ports::out::repositories::{OrderApprovalRepository, ProductRepository};
+use crate::ports::out::repositories::{OrderApprovalRepository, ProductRepository, StockChange};
 use domain::aggregates::order_approval::OrderApproval;
 use domain::services::{RequestedProduct, RestaurantApprovalDomainService};
 use shared::domain::value_objects::{OrderId, ProductId};
@@ -55,6 +55,7 @@ impl ApproveOrder {
                 .collect::<Vec<_>>(),
         )?;
 
+        let read = StockChange::snapshot(&products);
         let approval = RestaurantApprovalDomainService::approve_order(
             command.saga_id(),
             order_id,
@@ -62,15 +63,15 @@ impl ApproveOrder {
             &mut products,
         );
 
-        let updated_products = if approval.is_approved() {
-            products
+        let stock_changes = if approval.is_approved() {
+            StockChange::between(&read, &products)
         } else {
             vec![]
         };
 
         let message = restaurant_approval_response(&approval)?;
         self.approval_repository
-            .save_with_outbox(&approval, &updated_products, &message)?;
+            .save_with_outbox(&approval, &stock_changes, &message)?;
         let decision = if approval.is_approved() {
             "approved"
         } else {

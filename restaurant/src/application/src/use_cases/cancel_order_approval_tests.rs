@@ -1,5 +1,7 @@
 use crate::commands::{CancelOrderApprovalCommand, OrderProductDto};
-use crate::ports::out::repositories::{MockOrderApprovalRepository, MockProductRepository};
+use crate::ports::out::repositories::{
+    MockOrderApprovalRepository, MockProductRepository, StockChange,
+};
 use crate::use_cases::CancelOrderApproval;
 use domain::aggregates::order_approval::OrderApproval;
 use domain::aggregates::product::Product;
@@ -65,14 +67,20 @@ fn test_cancel_approved_order_restocks_and_cancels() -> anyhow::Result<()> {
     approval_repository
         .expect_save_cancellation()
         .once()
-        .withf(move |approval, products| {
+        .withf(move |approval, stock_changes| {
             approval.id() == approval_id
                 && approval.status() == OrderApprovalStatus::Cancelled
-                && products.len() == 2
-                && products[0].id() == pizza
-                && products[0].quantity() == 1 + 2 + 1
-                && products[1].id() == pasta
-                && products[1].quantity() == 3
+                && stock_changes
+                    == [
+                        StockChange {
+                            product_id: pizza,
+                            quantity: 2 + 1,
+                        },
+                        StockChange {
+                            product_id: pasta,
+                            quantity: 3,
+                        },
+                    ]
         })
         .returning(|_, _| Ok(()));
 

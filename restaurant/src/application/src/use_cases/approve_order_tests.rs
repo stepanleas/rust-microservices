@@ -1,6 +1,8 @@
 use crate::commands::{ApproveOrderCommand, OrderProductDto};
 use crate::outbox::{OutboxMessageType, RestaurantApprovalResponsePayload};
-use crate::ports::out::repositories::{MockOrderApprovalRepository, MockProductRepository};
+use crate::ports::out::repositories::{
+    MockOrderApprovalRepository, MockProductRepository, StockChange,
+};
 use crate::use_cases::ApproveOrder;
 use domain::aggregates::order_approval::OrderApproval;
 use domain::aggregates::product::Product;
@@ -56,13 +58,16 @@ fn test_approve_order_approves_order() -> anyhow::Result<()> {
     approval_repository
         .expect_save_with_outbox()
         .once()
-        .withf(move |approval, products, message| {
+        .withf(move |approval, stock_changes, message| {
             let payload: RestaurantApprovalResponsePayload = message.payload_as().unwrap();
 
             approval.status() == OrderApprovalStatus::Approved
                 && approval.saga_id() == saga_id
-                && products.len() == 1
-                && products[0].quantity() == 7
+                && stock_changes
+                    == [StockChange {
+                        product_id,
+                        quantity: -3,
+                    }]
                 && message.saga_id() == saga_id
                 && message.message_type() == OutboxMessageType::RestaurantApprovalResponse
                 && payload.order_id == order_id

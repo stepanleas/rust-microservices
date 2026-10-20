@@ -31,8 +31,9 @@ fi
 export BASE_URL=${BASE_URL:-http://api-gateway.$NAMESPACE:8070}
 export K6_PROMETHEUS_RW_SERVER_URL=http://kube-prometheus-stack-prometheus.monitoring:9090/api/v1/write
 export K6_FEATURES=native-histograms
+export K6_SETUP_TIMEOUT=${K6_SETUP_TIMEOUT:-5m}
 export K6_SYSTEM_TAGS=status,method,name,group,check,error_code,scenario,expected_response
-settings=$(env | grep -E '^(K6_PROMETHEUS_RW_SERVER_URL|K6_FEATURES|K6_SYSTEM_TAGS|BASE_URL|DIRECT|RATE|TOTAL|MIX|DURATION|MAX_RATE|PEAK_RATE|BASE_RATE|HOLD|RAMP|PROFILE|STEPS|STEP_DURATION_S|SAGA_SAMPLE|SAGA_TIMEOUT_S|CUSTOMERS|VUS|MAX_VUS)=' || true)
+settings=$(env | grep -E '^(K6_PROMETHEUS_RW_SERVER_URL|K6_FEATURES|K6_SETUP_TIMEOUT|K6_SYSTEM_TAGS|BASE_URL|DIRECT|RATE|TOTAL|MIX|DURATION|MAX_RATE|PEAK_RATE|BASE_RATE|HOLD|RAMP|PROFILE|STEPS|STEP_DURATION_S|SAGA_SAMPLE|SAGA_TIMEOUT_S|CUSTOMERS|VUS|MAX_VUS)=' || true)
 archive_env=()
 while IFS= read -r setting; do
   [[ -n "$setting" ]] && archive_env+=(-e "$setting")

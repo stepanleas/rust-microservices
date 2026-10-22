@@ -1,15 +1,21 @@
 #!/bin/sh
 # Managed by Ansible (node_exporter role). Whether the Forgejo Actions runner container runs, for
-# the LabCiRunnerOffline alert; a systemd timer calls it every minute.
+# the LabCiRunnerOffline alert; a systemd timer calls it every minute. `make lab_quiet` stops the
+# runner on purpose and leaves the marker $paused, which `make lab_unquiet` removes.
 set -eu
 out=/opt/lab/node-exporter/textfile/lab_ci_runner.prom
+paused=/opt/lab/node-exporter/ci-runner-paused
 {% raw %}
 running=$(docker inspect -f '{{.State.Running}}' forgejo-runner 2>/dev/null || echo false)
 {% endraw %}
 [ "$running" = true ] && value=1 || value=0
+paused_since=$(stat -c %Y "$paused" 2>/dev/null || echo 0)
 cat > "$out.tmp" <<METRIC
 # HELP lab_ci_runner_up Whether the Forgejo Actions runner container is running (1) or not (0).
 # TYPE lab_ci_runner_up gauge
 lab_ci_runner_up{runner="forgejo-runner"} $value
+# HELP lab_ci_runner_paused_since_timestamp_seconds When make lab_quiet paused the runner (0: not paused).
+# TYPE lab_ci_runner_paused_since_timestamp_seconds gauge
+lab_ci_runner_paused_since_timestamp_seconds{runner="forgejo-runner"} $paused_since
 METRIC
 mv "$out.tmp" "$out"

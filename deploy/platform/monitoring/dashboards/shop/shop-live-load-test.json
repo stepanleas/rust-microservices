@@ -87,10 +87,10 @@
         },
         "enable": true,
         "iconColor": "orange",
-        "expr": "changes(kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"shop\"}[1m]) > 0",
+        "expr": "changes(kube_deployment_spec_replicas{namespace=\"shop\", deployment=~\"api-gateway|catalog|customer|order|payment|restaurant\"}[1m]) > 0",
         "step": "30s",
-        "titleFormat": "{{horizontalpodautoscaler}} scaled",
-        "tagKeys": "horizontalpodautoscaler",
+        "titleFormat": "{{deployment}} scaled",
+        "tagKeys": "deployment",
         "useValueForTime": false
       },
       {
@@ -647,7 +647,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(k6_saga_e2e_duration_seconds{testid=~\"$testid\"}[1m])))",
+          "expr": "histogram_quantile(0.50, sum(rate(k6_saga_e2e_duration_seconds{testid=~\"$testid\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A",
           "range": true,
@@ -658,7 +658,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(k6_saga_e2e_duration_seconds{testid=~\"$testid\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum(rate(k6_saga_e2e_duration_seconds{testid=~\"$testid\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B",
           "range": true,
@@ -842,8 +842,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_current_replicas{namespace=\"shop\"})",
-          "legendFormat": "{{horizontalpodautoscaler}}",
+          "expr": "max by (deployment) (kube_deployment_status_replicas_available{namespace=\"shop\", deployment=~\"api-gateway|catalog|customer|order|payment|restaurant\"})",
+          "legendFormat": "{{deployment}}",
           "refId": "A",
           "range": true,
           "instant": false

@@ -38,10 +38,14 @@ groups:
           summary: "{{ $labels.service }} on the ops VM does not answer"
           description: "https://{{ $labels.instance }}/metrics fails: check `docker ps` on the ops VM."
       # lab_ci_runner_up comes from a timer on the ops VM (infra/ansible/roles/node_exporter).
-      # `make lab_quiet` stops the runner on purpose during load tests, hence the 15 minutes.
+      # `make lab_quiet` stops the runner on purpose during load tests: no alert for the first 3 hours
+      # of such a pause (lab_ci_runner_paused_since_timestamp_seconds), in case lab_unquiet is forgotten.
       - alert: LabCiRunnerOffline
         expr: |
-          max(lab_ci_runner_up) == 0
+          (
+            max(lab_ci_runner_up) == 0
+              unless on () (time() - max(lab_ci_runner_paused_since_timestamp_seconds > 0) < 3 * 3600)
+          )
             or (absent(lab_ci_runner_up) and on () max(up{job="scrapeConfig/monitoring/ops-node-exporter"}) == 1)
         for: 15m
         labels: {severity: warning}

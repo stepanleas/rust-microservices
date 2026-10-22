@@ -1,5 +1,5 @@
 use crate::commands::CancelOrderApprovalCommand;
-use crate::ports::out::repositories::{OrderApprovalRepository, ProductRepository};
+use crate::ports::out::repositories::{OrderApprovalRepository, ProductRepository, StockChange};
 use domain::aggregates::order_approval::OrderApproval;
 use domain::enums::OrderApprovalStatus;
 use shared::domain::value_objects::{OrderId, ProductId};
@@ -71,6 +71,7 @@ impl CancelOrderApproval {
         }
 
         let mut products = self.product_repository.find_by_ids(product_ids)?;
+        let read = StockChange::snapshot(&products);
 
         for item in command.products() {
             match products
@@ -89,7 +90,7 @@ impl CancelOrderApproval {
 
         approval.cancel()?;
         self.approval_repository
-            .save_cancellation(&approval, &products)?;
+            .save_cancellation(&approval, &StockChange::between(&read, &products))?;
         metrics::counter!("restaurant_order_cancellations_total").increment(1);
 
         tracing::info!(

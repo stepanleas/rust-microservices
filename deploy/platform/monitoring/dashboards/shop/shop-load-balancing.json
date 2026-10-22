@@ -253,8 +253,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"shop\", horizontalpodautoscaler=~\"(keda-hpa-)?($service)\"}",
-          "legendFormat": "{{horizontalpodautoscaler}} desired",
+          "expr": "kube_deployment_spec_replicas{namespace=\"shop\", deployment=~\"$service\"}",
+          "legendFormat": "{{deployment}} desired",
           "refId": "A",
           "range": true,
           "instant": false
@@ -264,8 +264,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"shop\", horizontalpodautoscaler=~\"(keda-hpa-)?($service)\"}",
-          "legendFormat": "{{horizontalpodautoscaler}} current",
+          "expr": "kube_deployment_status_replicas_available{namespace=\"shop\", deployment=~\"$service\"}",
+          "legendFormat": "{{deployment}} available",
           "refId": "B",
           "range": true,
           "instant": false

@@ -1,12 +1,11 @@
 use crate::DbPool;
-use crate::postgres::product::update_stock;
+use crate::postgres::product::apply_stock_changes;
 use crate::schema::order_approvals;
 use application::outbox::RestaurantOutboxMessage;
-use application::ports::out::repositories::OrderApprovalRepository;
+use application::ports::out::repositories::{OrderApprovalRepository, StockChange};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use domain::aggregates::order_approval::OrderApproval;
-use domain::aggregates::product::Product;
 use domain::enums::OrderApprovalStatus;
 use domain::value_objects::OrderApprovalId;
 use shared::domain::value_objects::OrderId;
@@ -79,7 +78,7 @@ impl OrderApprovalRepository for PostgresOrderApprovalRepository {
     fn save_with_outbox(
         &self,
         approval: &OrderApproval,
-        updated_products: &[Product],
+        stock_changes: &[StockChange],
         message: &RestaurantOutboxMessage,
     ) -> anyhow::Result<()> {
         let mut connection = self.pool.get()?;
@@ -89,7 +88,7 @@ impl OrderApprovalRepository for PostgresOrderApprovalRepository {
                 .values(OrderApprovalRow::from(approval))
                 .execute(conn)?;
 
-            update_stock(conn, updated_products)?;
+            apply_stock_changes(conn, stock_changes)?;
             insert_outbox_message(conn, message)?;
 
             Ok(())
@@ -99,7 +98,7 @@ impl OrderApprovalRepository for PostgresOrderApprovalRepository {
     fn save_cancellation(
         &self,
         approval: &OrderApproval,
-        restocked_products: &[Product],
+        stock_changes: &[StockChange],
     ) -> anyhow::Result<()> {
         let mut connection = self.pool.get()?;
 
@@ -121,7 +120,7 @@ impl OrderApprovalRepository for PostgresOrderApprovalRepository {
                 );
             }
 
-            update_stock(conn, restocked_products)?;
+            apply_stock_changes(conn, stock_changes)?;
 
             Ok(())
         })

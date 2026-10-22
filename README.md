@@ -766,7 +766,7 @@ One chart for every service, used six times through aliases:
 | Kafka | Strimzi `Kafka` 4.3.1 with one dual-role (controller + broker) `KafkaNodePool` node, Kafka metrics and the kafka-exporter for consumer lag; 12 topics + 10 `.dlq` topics as `KafkaTopic`, 12 partitions each; optional external listener on NodePorts 30093/30094 |
 | Gateway | Gateway API `Gateway` (class `envoy`) + `HTTPRoute` to the api-gateway; optional `/direct/<service>` routes; can attach to an existing Gateway (`parentRef`) |
 | Monitoring | PodMonitors for CNPG, Kafka and the kafka-exporter |
-| Tracing | `OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.monitoring:4318`, sampler `parentbased_traceidratio` with `global.tracing.sampleRatio` |
+| Tracing | `OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.monitoring:4318`, sampler `parentbased_traceidratio` with `global.tracing.sampleRatio` (1.0; 0.1 on the lab) |
 
 Replicas starting together apply the migrations one at a time: `shared::db::connect` holds a
 Postgres advisory lock around them.
@@ -1129,7 +1129,7 @@ Rules in `deploy/platform/monitoring/rules/` (plain Prometheus rule files, check
 | `LabDiskAlmostFull` | a root disk is almost full (lab) | warning |
 | `LabOpsVmDown`, `LabOpsServiceDown` | the ops VM or one of its services doesn't answer (lab) | critical / warning |
 | `LabCertificateExpiring` | a lab certificate expires in < 14 days (lab) | warning |
-| `LabCiRunnerOffline` | the Forgejo Actions runner container is not running, 15 min (lab; `make lab_quiet` stops it on purpose) | warning |
+| `LabCiRunnerOffline` | the Forgejo Actions runner container is not running, 15 min (lab; a `make lab_quiet` pause is ignored for 3 h) | warning |
 | `LabArgoAppOutOfSync`, `LabArgoAppDegraded` | an Argo CD application is OutOfSync or Degraded/Missing, 10 min (lab) | warning |
 
 On the lab Alertmanager sends every alert (except `Watchdog` and `InfoInhibitor`) to **ntfy** on
@@ -1304,7 +1304,47 @@ to `load-tests/reports/`. Neither is in git.
 
 ## Homelab verification results
 
-_Filled in after the lab checks._
+Run on 2026-10-20 against the lab (4 VMs on one 8-core, 32 GB laptop), services on images
+`1.1.0-lab`, then `1.2.0-lab` for order and restaurant (the fixes below). The per-run numbers are
+in [load-tests/README.md](load-tests/README.md#runs).
+
+**Load test volume:** 100,000 requests instead of the planned 1,000,000. The total only sets how
+long a run lasts (`TOTAL / RATE`); the rate is what the laptop can't hold. Under load the VMs see
+25-60% CPU steal, and the saga consumers handle one message at a time per pod, so the lab sustains
+about 10 orders/s. The runs use `TOTAL=100000 RATE=150 MIX=0.95` (7.5 orders/s, about 11 minutes).
+
+| Check | Result |
+|---|---|
+| Trace → logs | A slow order trace (3.4 s, 4 services) opens the logs of order, restaurant and payment by trace id; Loki → Tempo works the other way. The api-gateway logs only failures, so a successful request has no gateway lines. |
+| Alerts on ntfy | Fired and resolved: `ShopConsumerLagGrowing` (payment paused via KEDA), `ShopOutboxStuck` and `ShopKafkaDown` (Kafka's node halted), `LabNodeNotReady`, `ShopPostgresDown`, `ShopCircuitBreakerOpen`, `ShopDbPoolExhausted`, `ShopHighErrorRate`. |
+| Outbox publish times | 99% of publishes take 5-100 ms. The ~520 ms ones only happen right after a pod starts: the first send per producer and topic fetches metadata and a producer id. |
+| Per-pod balance, 3 replicas | Kafka consumers within ±3% (partitions split evenly). HTTP per pod: api-gateway within ±2%. catalog, order and restaurant vary between runs from ±10% to 1.5× max/min: the gateway keeps a few keep-alive connections per upstream and Cilium balances connections, not requests. |
+| Pod killed mid-run | 1 failed request of 92,153 (0.001%) with a catalog pod deleted and an order pod force-killed. |
+| KEDA | Scaled api-gateway, catalog, order and restaurant 2 → 4 under load and back to 2 after the cooldown, twice. |
+| 100k run, 3 replicas | 100,427 requests, 0 failed, p50 14 ms, p95 56 ms, p99 111 ms, saga p95 3.7 s, max lag 63; `make load_verify` passes. |
+| 100k run, 1 replica | 100,655 requests, 1 failed, p95 41 ms, saga p95 4.6 s, max lag 50; `make load_verify` passes. At this rate the host's shared CPU, not the replica count, is the limit. |
+| Node lost mid-run | `vagrant halt k8s-w2` at 50 req/s: Kafka, order-db and half the stateless pods were on it. The second Envoy pod kept the entry point up; reads served by w1 kept working, orders failed (50.9% of the run's requests) until the node returned. Stateless pods moved to w1 after the 5-minute eviction delay. Kafka and order-db came back with the node (local volumes), all pods were ready 3 minutes after it booted, every order ended PAID and the stock was consistent. |
+| Live load test dashboard | Every panel showed the run (client load, services, pools, lag, outbox, sagas, node steal) once the Replicas panels read the Deployments. |
+
+**Found and fixed during the checks:**
+
+- Restaurant stock lost updates with several replicas: an approval wrote back the absolute
+  quantity it computed, so two replicas approving the same product at once undid each other's
+  decrease (49 of 50 products off after a 3-replica run). Stock changes are now applied relative to
+  the stored quantity.
+- `order_items` had no index on `order_id`: every order lookup scanned the table, and order's
+  connection pool ran out at 150 req/s.
+- Strimzi rolled the only Kafka broker when a metrics config update failed under load, taking
+  Kafka down for every service: the Strimzi metrics reporter's allowlist is a dynamic broker
+  config that Kafka reads back as `null`, so every reconciliation re-applied it. Broker metrics now
+  come from the JMX exporter.
+- The kafka-exporter took ~10 s per scrape (the default timeout), so the lag series kept
+  disappearing and the lag alert flapped; it now has a 25 s timeout and skips Kafka's internal
+  topics.
+- Tempo was OOM-killed at its 1 GiB limit with every request traced: the lab traces one in ten.
+- `LabCiRunnerOffline` fired during long load tests (`make lab_quiet` stops the runner on purpose).
+- k6 `setup()` timed out right after `pin_replicas` while the consumers rebalanced; the stress
+  scenario stopped on a single dropped iteration.
 
 ---
 
@@ -1313,10 +1353,15 @@ _Filled in after the lab checks._
 - **catalog, customer and the manual payment endpoints publish directly** to Kafka after
   committing (no outbox). A publish failure returns HTTP 500 but keeps the change, which leaves
   the order and restaurant copies behind until the next update of that record.
-- **Restaurant stock writes are not locked.** An approval reads the stock, decides, and writes
-  the new absolute quantity. Two replicas approving orders for the same product at the same time
-  could overwrite each other's update. A conditional update (`quantity = quantity - n WHERE
-  quantity >= n`) or `SELECT … FOR UPDATE` would close the gap.
+- **Saga throughput is one message at a time per consumer pod.** A pod's listener handles its
+  partitions sequentially, so the saga rate is about replicas ÷ handler time (on the lab ~10
+  orders/s, as handlers slow from ~95 ms to 400+ ms under CPU steal). Handling partitions in
+  parallel within a pod would raise it without more replicas.
+- **Consumers dead-letter during infrastructure outages.** A message is retried 5 times (~30 s)
+  before it goes to `<topic>.dlq`, shorter than a node outage. When k8s-w2 was halted, one saga
+  reply was dead-lettered; it came back only because the offset commit was lost too (the order saga
+  finished, the DLQ keeps a stale copy and `load_verify` reports it). Retrying without limit, or
+  pausing the partition, while the database or Kafka is unavailable would keep such messages.
 - **Order item prices are not checked against the catalog.** The order service checks that the
   client's prices add up, not that they match the replicated product prices.
 - **The catalog quantity check is per item.** Two lines of the same product are each compared
@@ -1330,5 +1375,10 @@ _Filled in after the lab checks._
   yet; rebuilding the cluster means re-sealing the secrets (`~/.lab/grafana-admin.env`).
 - **CI metrics:** Forgejo exposes no job queue or job duration metrics, so the infrastructure
   dashboard only shows whether the runner runs; the Actions page shows the jobs.
-- **Linkerd** (per-request east-west balancing) is not installed: the plan adds it only if the
-  per-pod skew measured on the lab is above 20%.
+- **Linkerd** (per-request east-west balancing) is not installed. The lab measured more than 20%
+  HTTP skew for some services (connection-level balancing of the gateway's keep-alive
+  connections), the plan's condition for adding it, but a proxy per pod doesn't fit the lab's
+  memory (the host already swaps under load). Kafka consumption, the bulk of the saga work, is
+  balanced by partition and unaffected.
+- **The lab is CPU-bound:** 4 VMs share 8 cores with k6, and under load they see 25-60% CPU steal;
+  the load tests run 100,000 requests at 150 req/s rather than 1,000,000 at 2,000.

@@ -1,6 +1,6 @@
 use crate::schema::products;
 use crate::{DbPool, to_big_decimal, to_decimal};
-use application::ports::out::repositories::ProductRepository;
+use application::ports::out::repositories::{ProductRepository, StockChange};
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -44,16 +44,32 @@ impl From<ProductRow> for Product {
     }
 }
 
-/// Writes the stock of `updated` products with the caller's connection, so it joins the
-/// caller's transaction.
-pub(crate) fn update_stock(connection: &mut PgConnection, updated: &[Product]) -> QueryResult<()> {
-    for product in updated {
-        diesel::update(products::table.find(product.id().as_uuid()))
+/// Applies `changes` to the stored stock with the caller's connection, so it joins the caller's
+/// transaction. Relative to the stored quantity (`quantity = quantity + change`), so concurrent
+/// approvals of the same product each take their share; Postgres serializes them on the row.
+/// Fails when a product no longer has the stock a change takes.
+pub(crate) fn apply_stock_changes(
+    connection: &mut PgConnection,
+    changes: &[StockChange],
+) -> anyhow::Result<()> {
+    for change in changes {
+        let product = products::table
+            .find(change.product_id.as_uuid())
+            .filter(products::quantity.ge(-change.quantity));
+        let updated = diesel::update(product)
             .set((
-                products::quantity.eq(product.quantity()),
+                products::quantity.eq(products::quantity + change.quantity),
                 products::updated_at.eq(chrono::Utc::now().naive_utc()),
             ))
             .execute(connection)?;
+
+        if updated == 0 {
+            anyhow::bail!(
+                "Product {} does not have {} in stock any more",
+                change.product_id.as_uuid(),
+                -change.quantity,
+            );
+        }
     }
 
     Ok(())

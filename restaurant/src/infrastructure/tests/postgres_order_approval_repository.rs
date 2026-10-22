@@ -1,7 +1,9 @@
 mod common;
 
 use application::outbox::{RestaurantApprovalResponsePayload, restaurant_approval_response};
-use application::ports::out::repositories::{OrderApprovalRepository, ProductRepository};
+use application::ports::out::repositories::{
+    OrderApprovalRepository, ProductRepository, StockChange,
+};
 use domain::aggregates::order_approval::OrderApproval;
 use domain::aggregates::product::Product;
 use domain::enums::OrderApprovalStatus;
@@ -22,6 +24,13 @@ fn quantity(pool: &DbPool, product_id: ProductId) -> anyhow::Result<i32> {
         .quantity())
 }
 
+fn change(product_id: ProductId, quantity: i32) -> StockChange {
+    StockChange {
+        product_id,
+        quantity,
+    }
+}
+
 /// Stores an approved order that took `taken` items of a product that had 10.
 fn approve(pool: &DbPool, taken: i32) -> anyhow::Result<(OrderApproval, ProductId)> {
     let product_repository = PostgresProductRepository::new(pool);
@@ -29,11 +38,9 @@ fn approve(pool: &DbPool, taken: i32) -> anyhow::Result<(OrderApproval, ProductI
     product_repository.save(&Product::new(product_id, "Pizza".into(), 10, dec!(12.50)))?;
 
     let approval = OrderApproval::approved(Uuid::new_v4(), OrderId::new());
-    let mut product = product_repository.find_by_id(product_id)?.unwrap();
-    product.decrease_stock(taken)?;
     PostgresOrderApprovalRepository::new(pool).save_with_outbox(
         &approval,
-        &[product],
+        &[change(product_id, -taken)],
         &restaurant_approval_response(&approval)?,
     )?;
 
@@ -54,10 +61,8 @@ async fn test_save_approval_with_stock_and_outbox_in_one_transaction() -> anyhow
     let order_id = OrderId::new();
     let approval = OrderApproval::approved(saga_id, order_id);
     let message = restaurant_approval_response(&approval)?;
-    let mut product = product_repository.find_by_id(product_id)?.unwrap();
-    product.decrease_stock(4)?;
 
-    approval_repository.save_with_outbox(&approval, &[product], &message)?;
+    approval_repository.save_with_outbox(&approval, &[change(product_id, -4)], &message)?;
 
     let saved = approval_repository
         .find_by_order_id(order_id)?
@@ -127,7 +132,7 @@ async fn test_save_approval_rolls_back_when_order_already_processed() -> anyhow:
     let duplicate = OrderApproval::approved(Uuid::new_v4(), order_id);
     let result = approval_repository.save_with_outbox(
         &duplicate,
-        &[Product::new(product_id, "Pizza".into(), 1, dec!(12.50))],
+        &[change(product_id, -9)],
         &restaurant_approval_response(&duplicate)?,
     );
 
@@ -151,13 +156,9 @@ async fn test_save_cancellation_restocks_and_cancels_in_one_transaction() -> any
     let (mut approval, product_id) = approve(&pool, 4)?;
     assert_eq!(6, quantity(&pool, product_id)?);
 
-    let mut product = PostgresProductRepository::new(&pool)
-        .find_by_id(product_id)?
-        .unwrap();
-    product.increase_stock(4)?;
     approval.cancel()?;
 
-    approval_repository.save_cancellation(&approval, &[product])?;
+    approval_repository.save_cancellation(&approval, &[change(product_id, 4)])?;
 
     let saved = approval_repository
         .find_by_order_id(approval.order_id())?
@@ -183,11 +184,10 @@ async fn test_save_cancellation_rolls_back_when_approval_is_no_longer_approved()
     let (mut approval, product_id) = approve(&pool, 4)?;
     approval.cancel()?;
 
-    let restocked = |quantity| Product::new(product_id, "Pizza".into(), quantity, dec!(12.50));
-    approval_repository.save_cancellation(&approval, &[restocked(10)])?;
+    approval_repository.save_cancellation(&approval, &[change(product_id, 4)])?;
 
     // A duplicate cancellation (e.g. computed from a stale read) must change nothing.
-    let result = approval_repository.save_cancellation(&approval, &[restocked(14)]);
+    let result = approval_repository.save_cancellation(&approval, &[change(product_id, 4)]);
 
     assert!(result.is_err());
     assert_eq!(10, quantity(&pool, product_id)?);
@@ -197,6 +197,66 @@ async fn test_save_cancellation_rolls_back_when_approval_is_no_longer_approved()
             .find_by_order_id(approval.order_id())?
             .unwrap()
             .status()
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_concurrent_approvals_of_one_product_each_take_their_stock() -> anyhow::Result<()> {
+    let (_container, pool) = common::start_postgres().await?;
+    let approval_repository = PostgresOrderApprovalRepository::new(&pool);
+    let product_id = ProductId::new();
+    PostgresProductRepository::new(&pool).save(&Product::new(
+        product_id,
+        "Pizza".into(),
+        10,
+        dec!(12.50),
+    ))?;
+
+    // Two replicas read a stock of 10 at the same time, then take 3 and 4: neither may undo the
+    // other's decrease (it did when the approval wrote back the absolute quantity it computed).
+    for taken in [3, 4] {
+        let approval = OrderApproval::approved(Uuid::new_v4(), OrderId::new());
+        approval_repository.save_with_outbox(
+            &approval,
+            &[change(product_id, -taken)],
+            &restaurant_approval_response(&approval)?,
+        )?;
+    }
+
+    assert_eq!(3, quantity(&pool, product_id)?);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_save_approval_rolls_back_when_the_stock_was_taken_meanwhile() -> anyhow::Result<()> {
+    let (_container, pool) = common::start_postgres().await?;
+    let approval_repository = PostgresOrderApprovalRepository::new(&pool);
+    let outbox_repository = PostgresOutboxRepository::new(&pool);
+    let (_, product_id) = approve(&pool, 8)?;
+
+    // Computed from a stale read of 10: only 2 are left.
+    let late = OrderApproval::approved(Uuid::new_v4(), OrderId::new());
+    let result = approval_repository.save_with_outbox(
+        &late,
+        &[change(product_id, -5)],
+        &restaurant_approval_response(&late)?,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(2, quantity(&pool, product_id)?);
+    assert!(
+        approval_repository
+            .find_by_order_id(late.order_id())?
+            .is_none()
+    );
+    assert_eq!(
+        1,
+        outbox_repository
+            .find_by_status(OutboxStatus::Started, 10)?
+            .len()
     );
 
     Ok(())

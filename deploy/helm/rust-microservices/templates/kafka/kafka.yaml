@@ -71,20 +71,60 @@ spec:
       num.partitions: {{ $kafka.partitions }}
       group.initial.rebalance.delay.ms: 0
     {{- if $.Values.metrics.enabled }}
-    # Broker metrics in the Prometheus format on port 9404 (PodMonitor `kafka`).
+    # Broker metrics in the Prometheus format on port 9404 (PodMonitor `kafka`), from the JMX
+    # exporter agent and its rules below. Not the Strimzi metrics reporter: its allowlist is a
+    # dynamic broker config that Kafka reads back as sensitive (null), so every reconciliation
+    # applied it again, and when that failed under load Strimzi rolled the only broker.
     metricsConfig:
-      type: strimziMetricsReporter
-      values:
-        allowList:
-          - "kafka_server_.*"
-          - "kafka_network_.*"
-          - "kafka_log_.*"
-          - "kafka_controller_.*"
-          - "kafka_coordinator_group_.*"
-  # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics).
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: {{ $kafka.name }}-metrics
+          key: kafka-metrics-config.yml
+  # Consumer lag per group/topic/partition and topic offsets (incl. the .dlq topics), without
+  # Kafka's internal topics (__consumer_offsets: 50 partitions nobody alerts on).
   kafkaExporter:
     topicRegex: ".*"
+    topicExcludeRegex: "^__.*"
     groupRegex: ".*"
     {{- end }}
   entityOperator:
     topicOperator: {}
+{{- if .Values.metrics.enabled }}
+---
+# Rules of the JMX exporter: the broker's request, topic, replica, log and controller metrics.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $kafka.name }}-metrics
+  labels:
+    app.kubernetes.io/part-of: rust-microservices
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+      # kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=orders -> kafka_server_brokertopicmetrics_messagesin_total
+      - pattern: kafka.(server)<type=(.+), name=(.+)PerSec\w*, topic=(.+)><>Count
+        name: kafka_$1_$2_$3_total
+        type: COUNTER
+        labels: {topic: "$4"}
+      - pattern: kafka.(server)<type=(.+), name=(.+)PerSec\w*><>Count
+        name: kafka_$1_$2_$3_total
+        type: COUNTER
+      - pattern: kafka.network<type=RequestMetrics, name=(RequestsPerSec|ErrorsPerSec), request=(.+)(, error=(.+))?><>Count
+        name: kafka_network_requestmetrics_$1_total
+        type: COUNTER
+        labels: {request: "$2", error: "$4"}
+      - pattern: kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(.+)><>(50thPercentile|99thPercentile)
+        name: kafka_network_requestmetrics_totaltimems
+        type: GAUGE
+        labels: {request: "$1", quantile: "$2"}
+      - pattern: kafka.(server|controller|network|log)<type=(.+), name=(.+)><>Value
+        name: kafka_$1_$2_$3
+        type: GAUGE
+      - pattern: kafka.log<type=Log, name=Size, topic=(.+), partition=(.+)><>Value
+        name: kafka_log_log_size
+        type: GAUGE
+        labels: {topic: "$1", partition: "$2"}
+{{- end }}

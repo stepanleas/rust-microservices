@@ -44,7 +44,8 @@ A run fails (exit code 99) when a threshold breaks (`k6/lib/thresholds.js`):
 
 * `http_req_failed` < 1%
 * p95 < 500 ms for reads, < 1 s for order placements
-* `dropped_iterations` = 0: k6 kept up with the target rate
+* `dropped_iterations` = 0: k6 kept up with the target rate (`stress` and `PROFILE=max`, which stop at
+  the first broken threshold: under 1 dropped iteration per second)
 * `saga_timeouts` = 0: every sampled saga finished within `SAGA_TIMEOUT_S`
 
 `make load_verify` (`scripts/verify.sh`) then checks the end state once the sagas drained:
@@ -91,8 +92,43 @@ for up to 60 s and the VU budget didn't account for it (fixed since). The saga t
 the order, restaurant and payment consumers fell behind at 80 orders/s. Afterwards the shop
 drained and `make load_verify` passed (21,634 orders PAID, nothing lost).
 
-Still to record (lab, Phase 6 and 7 checks): `one-million` on the lab, 1 vs 3 replicas, kind vs
-lab, per-pod request skew with 3 replicas, a pod killed mid-run, `vagrant halt k8s-w2` mid-run.
+### Lab (2026-10-20)
+
+`one-million` runs `TOTAL=100000 RATE=150 MIX=0.95` on the lab (95% reads, 7.5 orders/s): a
+million requests at 2,000/s is beyond one laptop running four VMs (see "Lab vs kind" below).
+
+| Date | Commit | Target | Scenario | Replicas | Rate | Requests | Req/s | p50 | p95 | p99 | Saga p95 | Max lag | Failed | Thresholds |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-20 | ce2fd1c | lab | smoke | 2 | 1 VU | 273 | 4 | 13 ms | 45 ms | 70 ms | 3.21 s | 26 | 0.00% | pass |
+| 2026-10-20 | ce2fd1c | lab | place-orders | 0 payment | 5 | 24,135 | 16 | 29 ms | 626 ms | 1.70 s | – | 7,500 | 0.00% | FAIL (on purpose)² |
+| 2026-10-20 | fa71134 | lab | mixed | 3 | 150 | 65,523 | 135 | 150 ms | 4.68 s | 7.96 s | – | 5,981 | 17.62% | FAIL³ |
+| 2026-10-20 | 417f554 | lab | mixed | 3 | 150 | 92,153 | 180 | 75 ms | 594 ms | 1.31 s | 44.63 s | 11,646 | 0.00% | FAIL: saga_timeouts, dropped_iterations, order p95⁴ |
+| 2026-10-20 | 417f554 | lab | stress (`MAX_RATE=600`) | 2→4 (KEDA) | 100 | 5,625 | 91 | 27 ms | 141 ms | 275 ms | 9.44 s | 253 | 0.00% | stopped: 1 dropped iteration⁵ |
+| 2026-10-20 | 1d64708 | lab | one-million (100k) | 3 | 150 | 100,380 | 150 | 18 ms | 77 ms | 169 ms | 3.47 s | 38 | 0.00% | FAIL: dropped_iterations (31)⁶ |
+| 2026-10-20 | d86c3d8 | lab | one-million (100k) | 3 | 150 | 100,427 | 150 | 14 ms | 56 ms | 111 ms | 3.73 s | 63 | 0.00% | dropped_iterations (15) only; verify ok |
+| 2026-10-20 | d86c3d8 | lab | one-million (100k) | 1 | 150 | 100,655 | 150 | 10 ms | 41 ms | 100 ms | 4.61 s | 50 | 0.00% | dropped_iterations (54) only; verify ok |
+| 2026-10-20 | d86c3d8 | lab | mixed, k8s-w2 halted | 3 | 50 | 30,062 | 40 | 23 ms | 6.58 s | 9.53 s | 2.94 s | 31 | 50.89% | FAIL (node loss)⁷ |
+
+² payment paused with KEDA for the lag alert: sagas can't finish.
+³ Strimzi rolled the only Kafka broker mid-run (fixed: broker metrics from the JMX exporter).
+⁴ `order_items` had no `order_id` index: order's connection pool ran out (fixed). The run also
+included a graceful catalog pod delete and an order pod force-kill: 1 failed request of 92,153.
+⁵ fewer than 1 dropped iteration per second no longer stops a knee search (fixed).
+⁶ `make load_verify` found restaurant stock off by 1-8 units on 49 products: replicas overwrote
+each other's stock decrease (fixed in `1.2.0-lab`; the stock was then reset to the expected values).
+⁷ k8s-w2 (Kafka, order-db) halted from minute 2 to 8: orders fail until it returns, then every saga
+finishes; one reply was dead-lettered during the outage (see the README's known limitations).
+
+The `dropped_iterations` left in the 100k runs are k6's own: on the busy host a VU was sometimes
+not free at the scheduled moment (0.02-0.05% of the iterations).
+
+### Lab vs kind
+
+On kind (one machine, no VMs) `mixed` at 150 req/s passed and sagas saturated around 80 orders/s.
+The lab holds ~10 orders/s: each consumer pod handles one message at a time, and its handler time
+grows from ~95 ms to 400+ ms under the 25-60% CPU steal the VMs see when all four are busy. With
+3 vs 1 replica at 150 req/s the HTTP latencies are the same (p95 56 vs 41 ms) and sagas only
+slightly faster (3.7 vs 4.6 s p95): more pods on the same 8 cores add no capacity.
 
 ## Micro-benchmarks
 

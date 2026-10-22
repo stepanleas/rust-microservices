@@ -65,6 +65,9 @@ if [[ "${PROM:-1}" == 1 ]]; then
 fi
 # Native histograms: Grafana computes any percentile over any window, across runners.
 export K6_FEATURES=native-histograms
+# setup() waits up to 60 s per new customer until the order service knows it (longer while the
+# consumers rebalance, e.g. right after pin_replicas); k6's default allows 60 s for all of it.
+export K6_SETUP_TIMEOUT=${K6_SETUP_TIMEOUT:-5m}
 # No `url` tag (one series per id) nor connection details: these become Prometheus labels.
 export K6_SYSTEM_TAGS=${K6_SYSTEM_TAGS:-status,method,name,group,check,error_code,scenario,expected_response}
 export K6_WEB_DASHBOARD=${K6_WEB_DASHBOARD:-true} K6_WEB_DASHBOARD_OPEN=false

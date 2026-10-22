@@ -13,6 +13,8 @@ kubernetes_package_revision: "1.1"
 kubernetes_pod_subnet: 10.244.0.0/16
 kubernetes_service_subnet: 10.96.0.0/12
 containerd_version: 2.4.1
+# sha256 of containerd.service at that version: lets check mode see that the unit is unchanged.
+containerd_unit_sha256: 1941362cbaa89dd591b99c32b050d82c583d3cd2e5fa63085d7017457ec5fca8
 runc_version: 1.5.2
 cilium_version: 1.20.2
 kubelet_csr_approver_version: 1.2.15

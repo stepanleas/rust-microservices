@@ -11,6 +11,8 @@
   loop: "{{ forgejo_actions_variables | dict2items }}"
   loop_control: {label: "{{ item.key }}"}
   register: forgejo_variables
+  # Read-only: also runs in check mode (make lab_drift), where the tasks below depend on it.
+  check_mode: false
 
 - name: Create or update repository variables
   ansible.builtin.uri:
@@ -36,6 +38,8 @@
     url_password: "{{ vault_forgejo_admin_password }}"
     force_basic_auth: true
   register: forgejo_secrets
+  # Read-only: also runs in check mode (make lab_drift), where the tasks below depend on it.
+  check_mode: false
 
 - name: Repository secrets
   ansible.builtin.uri:
@@ -79,6 +83,8 @@
   when: forgejo_token_file.stat.exists
   register: forgejo_token_check
   no_log: true
+  # Read-only: also runs in check mode (make lab_drift), where the tasks below depend on it.
+  check_mode: false
 
 - name: New host token
   when: not forgejo_token_file.stat.exists or forgejo_token_check.status != 200

@@ -22,7 +22,8 @@ fi
 
 # The first explicit push URL replaces the implicit one, so GitHub is added back explicitly.
 github_url=$(git remote get-url origin)
-push_urls=$(git remote get-url --push --all origin)
+# Only the configured ones: before the first, `get-url --push` reports GitHub implicitly.
+push_urls=$(git config --get-all remote.origin.pushurl || true)
 grep -qxF "$github_url" <<<"$push_urls" || git remote set-url --add --push origin "$github_url"
 grep -qxF "$LAB_URL" <<<"$push_urls" || git remote set-url --add --push origin "$LAB_URL"
 

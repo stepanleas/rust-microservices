@@ -53,6 +53,8 @@
     force_basic_auth: true
     status_code: [204, 404]
   register: forgejo_env_collaborator
+  # Read-only: also runs in check mode (make lab_drift), where the tasks below depend on it.
+  check_mode: false
 
 - name: Add the deploy user as collaborator
   ansible.builtin.uri:
@@ -76,6 +78,8 @@
     url_password: "{{ vault_forgejo_admin_password }}"
     force_basic_auth: true
   register: forgejo_secrets_now
+  # Read-only: also runs in check mode (make lab_drift), where the tasks below depend on it.
+  check_mode: false
 
 - name: New deploy token
   when: forgejo_deploy_token_secret not in (forgejo_secrets_now.json | map(attribute='name') | list)

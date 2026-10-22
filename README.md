@@ -893,6 +893,9 @@ created on first use and encrypted with Ansible Vault in
 | `make lab_k8s_reset` | rebuild the cluster on the existing VMs (workloads are lost) |
 | `make lab_etcd_backup` / `lab_backup` | etcd snapshot + PKI (and a Forgejo dump) to `~/.lab/backups/<time>/` |
 | `make lab_bootstrap [REVISION=<branch>]` | Argo CD + root Application; `REVISION` makes the lab follow a branch |
+| `make lab_drift [REVISION=<branch>]` | drift check: provisioning in check mode must change nothing |
+| `make lab_remote` / `lab_sync` | push to GitHub and the lab at once / catch the lab up with GitHub's branches |
+| `make ci_exec WORKFLOW=infra.yml [JOB=…]` | run a workflow locally with the lab's runner (`forgejo-runner exec`) |
 | `make lab_start` | boot the halted lab in stages: ops, then the cluster; CI starts once Postgres, Kafka and Argo CD are Ready |
 | `make lab_halt` / `lab_destroy` | stop / delete the VMs (`~/.lab` is kept) |
 

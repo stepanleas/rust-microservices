@@ -86,6 +86,10 @@ Then:
 | `make lab_start` | boots the halted lab in stages: ops (DNS, registry) with its CI runner stopped, then the cluster VMs; the runner starts once Postgres, Kafka and Argo CD are Ready. All four at once left every pod restarting on probe timeouts |
 | `make lab_halt` / `lab_destroy` | stop / delete the VMs (`~/.lab` is kept, so a rebuild reuses the CA) |
 | `make lab_bootstrap [REVISION=<branch>]` | Argo CD + the root Application (also part of `lab_provision`); `REVISION` makes the lab follow a branch instead of `main` |
+| `make lab_drift [REVISION=<branch>]` | drift check: the whole provisioning in check mode, failing when it would change anything. Runs on this machine, not in CI: the playbooks need the lab CA, the vault password and the VMs' SSH keys from `~/.lab` and `.vagrant` |
+| `make lab_remote` | once per clone: remote `lab`, and `git push origin` pushes to GitHub and the lab |
+| `make lab_sync` | after the lab was down during a push: pushes GitHub's branches to the lab (no tags: a tag starts a release; never rewinds a branch) |
+| `make ci_exec WORKFLOW=infra.yml [JOB=…]` | runs a workflow here with the lab's runner and job image (`forgejo-runner exec`), lab variables but no secrets |
 | `make seal NAME=… NS=… FROM=<file> [OUT=…]` | a SealedSecret from a `KEY=value` file, safe to commit; only the lab cluster can decrypt it |
 
 ## CI/CD and GitOps

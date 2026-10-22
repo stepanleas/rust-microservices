@@ -27,6 +27,7 @@
   ansible.builtin.get_url:
     url: "https://raw.githubusercontent.com/containerd/containerd/v{{ containerd_version }}/containerd.service"
     dest: /etc/systemd/system/containerd.service
+    checksum: "sha256:{{ containerd_unit_sha256 }}"
     mode: "0644"
   notify: Restart containerd
 

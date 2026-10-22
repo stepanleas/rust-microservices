@@ -17,6 +17,14 @@ spec:
         size: {{ $kafka.storageSize }}
         deleteClaim: true
         kraftMetadata: shared
+  {{- with $kafka.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $kafka.jvmOptions }}
+  jvmOptions:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- with $kafka.external.nodeSelector }}
   {{- if $kafka.external.enabled }}
   template:

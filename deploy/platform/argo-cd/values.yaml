@@ -63,3 +63,7 @@ repoServer:
   metrics:
     enabled: true
     serviceMonitor: {enabled: true}
+  # The chart's 1 s probe timeouts restarted the repo server again and again after a cold boot of
+  # the lab, under heavy CPU steal; no repo server = every Application `Unknown`.
+  livenessProbe: {timeoutSeconds: 10, failureThreshold: 6}
+  readinessProbe: {timeoutSeconds: 5}

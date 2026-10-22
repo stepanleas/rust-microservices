@@ -11,11 +11,26 @@ global:
   tracing:
     sampleRatio: "0.1"
 
+# The broker's heap is capped: without a limit the JVM sized it from the worker's memory and
+# the broker took ~1.2 GB of a laptop already short of RAM.
 kafka:
   storageSize: 5Gi
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 512m
+  resources:
+    requests: {cpu: 200m, memory: 768Mi}
+    limits: {memory: 1Gi}
 
+# The probes wait longer: after a cold boot of the VMs, 5 s timeouts under heavy CPU steal made
+# every instance restart over and over instead of starting.
 postgres:
   storageSize: 2Gi
+  probes:
+    # Explicit threshold: the default 1 h window (startDelay) at a 10 s period.
+    startup: {timeoutSeconds: 15, periodSeconds: 10, failureThreshold: 360}
+    liveness: {timeoutSeconds: 15, periodSeconds: 10, failureThreshold: 6}
+    readiness: {timeoutSeconds: 15}
 
 gateway:
   hostname: shop.lab.internal

@@ -651,7 +651,7 @@ for the `observability` feature.
 | Host + compose infra | services via `cargo run`, Postgres and Kafka in Docker | `make infra_up` | Docker, Rust, C toolchain |
 | docker compose (scaled) | production images, 3× order and restaurant | `make scale_up` | Docker, `make build_images version=local` |
 | kind | the whole system on a 3-node local cluster with the platform | `make kind_*` | Docker (~6 CPUs, 12–16 GB) |
-| Homelab | 4 KVM VMs, kubeadm, GitOps | `make lab_*` | KVM, ~23 GB free RAM |
+| Homelab | 4 KVM VMs, kubeadm, GitOps | `make lab_*` | KVM, ~19 GB free RAM |
 
 ### Everything in Docker (development, hot reload)
 
@@ -816,12 +816,12 @@ network. Full details, first run, day-2 operations and troubleshooting are in
 
 | VM | IP | vCPU / RAM / disk | Runs |
 |---|---|---|---|
-| `ops` | 192.168.56.10 | 4 / 6 GB / 80 GB | dnsmasq, Caddy (TLS), Zot registry + docker.io cache, Forgejo + Actions runner, ntfy, node-exporter, Alloy (ops logs → Loki) |
+| `ops` | 192.168.56.10 | 4 / 3.5 GB / 80 GB | dnsmasq, Caddy (TLS), Zot registry + docker.io cache, Forgejo + Actions runner, ntfy, node-exporter, Alloy (ops logs → Loki) |
 | `k8s-cp` | 192.168.56.11 | 2 / 4 GB / 30 GB | kubeadm control plane (tainted; only the k6 runners tolerate it) |
-| `k8s-w1`, `k8s-w2` | 192.168.56.12, .13 | 4 / 6.5 GB / 60 GB | workloads |
+| `k8s-w1`, `k8s-w2` | 192.168.56.12, .13 | 4 / 5.5 GB / 60 GB | workloads |
 | LoadBalancer pool | 192.168.56.200–.220 | – | Cilium LB-IPAM, announced over ARP; `.200` is the cluster ingress (Envoy) |
 
-That's 23 GB of RAM and 14 vCPUs; CPU is overcommitted on 8 host threads. The topology lives in
+That's 18.5 GB of RAM and 14 vCPUs (the VMs return their free memory to the host); CPU is overcommitted on 8 host threads. The topology lives in
 one file, `infra/lab.yml`, read by both the `Vagrantfile` and the Ansible inventory
 (`inventory/lab.py`).
 
@@ -893,6 +893,7 @@ created on first use and encrypted with Ansible Vault in
 | `make lab_k8s_reset` | rebuild the cluster on the existing VMs (workloads are lost) |
 | `make lab_etcd_backup` / `lab_backup` | etcd snapshot + PKI (and a Forgejo dump) to `~/.lab/backups/<time>/` |
 | `make lab_bootstrap [REVISION=<branch>]` | Argo CD + root Application; `REVISION` makes the lab follow a branch |
+| `make lab_start` | boot the halted lab in stages: ops, then the cluster; CI starts once Postgres, Kafka and Argo CD are Ready |
 | `make lab_halt` / `lab_destroy` | stop / delete the VMs (`~/.lab` is kept) |
 
 Only the inventory knows about Vagrant. Moving the lab to 2–3 mini PCs means a static inventory

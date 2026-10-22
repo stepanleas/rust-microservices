@@ -3,7 +3,8 @@ log:
   level: info
 runner:
   file: /data/.runner
-  capacity: 2
+  # One job at a time: a Rust build or test job takes up to ~2 GB of the ops VM's 3.5 GB.
+  capacity: 1
   timeout: 3h
   # Node-based actions (checkout, cache, ...) trust the lab CA through the mounted bundle.
   envs:

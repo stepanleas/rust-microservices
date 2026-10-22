@@ -221,6 +221,10 @@ lab_etcd_backup:
 lab_backup:
 	$(lab_ansible) ansible-playbook playbooks/backup.yml
 
+# Boots the halted lab in stages: ops, then the cluster; the CI runner waits until it is up.
+lab_start:
+	./infra/scripts/lab-start.sh
+
 lab_halt:
 	$(lab_vagrant) halt
 

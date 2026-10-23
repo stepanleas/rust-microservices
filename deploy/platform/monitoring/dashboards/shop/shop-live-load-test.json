@@ -42,10 +42,10 @@
         "name": "total",
         "label": "Request budget",
         "type": "textbox",
-        "query": "1000000",
+        "query": "100000",
         "current": {
-          "text": "1000000",
-          "value": "1000000"
+          "text": "100000",
+          "value": "100000"
         },
         "hide": 0
       }
@@ -138,7 +138,7 @@
     {
       "type": "stat",
       "title": "Progress (requests of the budget)",
-      "description": "Reads and orders sent so far (not the saga polls or the setup) out of the `total` variable, e.g. 1,000,000.",
+      "description": "Reads and orders sent so far (not the saga polls or the setup) out of the `total` variable, e.g. 100,000.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

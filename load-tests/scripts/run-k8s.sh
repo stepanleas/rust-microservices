@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs a k6 scenario inside the cluster with the k6-operator: PARALLELISM (4) runners pinned to
 # the control-plane node, against the api-gateway Service (BASE_URL to override).
-#   SCENARIO=one-million PARALLELISM=4 TARGET=lab load-tests/scripts/run-k8s.sh
+#   SCENARIO=hundred-thousand PARALLELISM=4 TARGET=lab load-tests/scripts/run-k8s.sh
 # The scenario's settings (RATE, TOTAL, MIX, ...) pass through the environment. The runners'
 # logs are archived in load-tests/reports/<time>-<scenario>-<target>-k8s/.
 . "$(dirname "$0")/lib.sh"

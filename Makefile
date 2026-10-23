@@ -132,11 +132,11 @@ load_tool:
 load_seed:
 	SCENARIO=seed TARGET=$(TARGET) ./load-tests/scripts/run.sh
 
-# k6 on this machine: make load SCENARIO=smoke|read-heavy|place-orders|mixed|stress|spike|soak|one-million
+# k6 on this machine: make load SCENARIO=smoke|read-heavy|place-orders|mixed|stress|spike|soak|hundred-thousand
 load:
 	SCENARIO=$(SCENARIO) TARGET=$(TARGET) ./load-tests/scripts/run.sh
 
-# k6 inside the cluster (k6-operator), runners on the control plane: make load_k8s SCENARIO=one-million PARALLELISM=4
+# k6 inside the cluster (k6-operator), runners on the control plane: make load_k8s SCENARIO=hundred-thousand PARALLELISM=4
 load_k8s:
 	SCENARIO=$(SCENARIO) PARALLELISM=$(PARALLELISM) TARGET=$(TARGET) ./load-tests/scripts/run-k8s.sh
 

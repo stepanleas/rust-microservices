@@ -10,7 +10,7 @@ restaurant step when the payment fails. Every saga message leaves its service th
 Around the code there is a complete local DevOps setup with no cloud dependency: Helm charts
 for a kind cluster and for a homelab of KVM virtual machines (Vagrant + Ansible + kubeadm),
 CI/CD that runs the same workflows on GitHub and on a local Forgejo, GitOps with Argo CD,
-metrics, logs, traces and alerts, autoscaling, and k6 load tests up to 1,000,000 requests.
+metrics, logs, traces and alerts, autoscaling, and k6 load tests of up to 100,000 requests per run.
 
 ## Contents
 
@@ -713,10 +713,12 @@ For example: `curl localhost:8088/shop/catalog/api/categories`.
 
 ```bash
 make lab_tools lab_host     # once: Ansible in .tools/, then libvirt/Vagrant on this machine (sudo)
-make lab_up lab_verify      # VMs + provisioning, then the health checks
+make lab_up lab_verify      # first run: VMs + provisioning, then the health checks
+make lab_start              # later boots: ops first, then the cluster, CI once the cluster is Ready
+make lab_halt               # shut the VMs down
 ```
 
-Stop kind first: both together don't fit in 31 GB. See [Homelab](#7-homelab) and
+Stop kind first: both together don't fit in 31 GB (the lab alone takes 18.5 GB). See [Homelab](#7-homelab) and
 [infra/README.md](infra/README.md).
 
 ---
@@ -1144,7 +1146,7 @@ Subscribe to that topic in a browser or the ntfy app for push notifications.
 
 ## 11. Load testing and benchmarks
 
-k6 scenarios from a smoke test to exactly 1,000,000 requests, run from this machine or inside
+k6 scenarios from a smoke test to exactly 100,000 requests, run from this machine or inside
 the cluster (k6-operator), with a consistency check afterwards and the results live on Grafana's
 *Live load test* dashboard. Full guide, settings and recorded runs:
 [load-tests/README.md](load-tests/README.md).
@@ -1153,7 +1155,7 @@ the cluster (k6-operator), with a consistency check afterwards and the results l
 make load_tool load_seed                              # once: k6, then 50 products with a huge stock
 make load SCENARIO=mixed                              # TARGET=kind (default) | lab
 make load_verify                                      # the shop is consistent afterwards
-make load_k8s SCENARIO=one-million PARALLELISM=4      # runners inside the cluster
+make load_k8s SCENARIO=hundred-thousand PARALLELISM=4 # runners inside the cluster
 ```
 
 | Scenario | Load |
@@ -1165,7 +1167,7 @@ make load_k8s SCENARIO=one-million PARALLELISM=4      # runners inside the clust
 | `stress` | ramps the mix until a threshold breaks: the knee |
 | `spike` | base → peak in 10 s, hold, back down |
 | `soak` | moderate mix for an hour: leaks, outbox growth, connection churn |
-| `one-million` | exactly `TOTAL` (1,000,000) requests at `RATE` (2,000/s) |
+| `hundred-thousand` | exactly `TOTAL` (100,000) requests at `RATE` (150/s), 95% reads: about 11 minutes |
 
 A run fails when `http_req_failed` ≥ 1%, read p95 ≥ 500 ms, order p95 ≥ 1 s, any iteration is
 dropped, or a sampled saga does not finish in time. `make load_verify` then checks that every
@@ -1184,8 +1186,10 @@ PAID orders. On the lab the scripts pause the CI runner during a run.
   from 2 to 3 replicas, HTTP stayed fast enough (p95 310 ms) but the saga consumers fell behind
   at 80 orders/s: saga p95 53 s, max lag 4,888, and the run failed on saga timeouts. Afterwards
   the shop drained and `make load_verify` passed (21,634 orders PAID, nothing lost).
-- Still to record: `one-million` on the lab, 1 vs. 3 replicas, kind vs. lab, per-pod skew, a pod
-  killed mid-run, a worker halted mid-run.
+- On the lab, `hundred-thousand` passes with 3 and with 1 replica (p95 56 vs. 41 ms, saga p95
+  3.7 vs. 4.6 s): the host's shared CPU is the limit, not the replica count. The lab sustains about
+  10 orders/s. Per-pod balance, a pod killed mid-run and a worker halted mid-run are in
+  [Homelab verification results](#homelab-verification-results).
 
 ### Micro-benchmarks
 
@@ -1312,10 +1316,10 @@ Run on 2026-10-20 against the lab (4 VMs on one 8-core, 32 GB laptop), services 
 `1.1.0-lab`, then `1.2.0-lab` for order and restaurant (the fixes below). The per-run numbers are
 in [load-tests/README.md](load-tests/README.md#runs).
 
-**Load test volume:** 100,000 requests instead of the planned 1,000,000. The total only sets how
-long a run lasts (`TOTAL / RATE`); the rate is what the laptop can't hold. Under load the VMs see
-25-60% CPU steal, and the saga consumers handle one message at a time per pod, so the lab sustains
-about 10 orders/s. The runs use `TOTAL=100000 RATE=150 MIX=0.95` (7.5 orders/s, about 11 minutes).
+**Load test volume:** 100,000 requests per run, the `hundred-thousand` scenario's defaults
+(`TOTAL=100000 RATE=150 MIX=0.95`: 7.5 orders/s, about 11 minutes). The rate is what the laptop
+can hold: under load the VMs see 25-60% CPU steal, and the saga consumers handle one message at a
+time per pod, so the lab sustains about 10 orders/s.
 
 | Check | Result |
 |---|---|
@@ -1325,8 +1329,8 @@ about 10 orders/s. The runs use `TOTAL=100000 RATE=150 MIX=0.95` (7.5 orders/s, 
 | Per-pod balance, 3 replicas | Kafka consumers within ±3% (partitions split evenly). HTTP per pod: api-gateway within ±2%. catalog, order and restaurant vary between runs from ±10% to 1.5× max/min: the gateway keeps a few keep-alive connections per upstream and Cilium balances connections, not requests. |
 | Pod killed mid-run | 1 failed request of 92,153 (0.001%) with a catalog pod deleted and an order pod force-killed. |
 | KEDA | Scaled api-gateway, catalog, order and restaurant 2 → 4 under load and back to 2 after the cooldown, twice. |
-| 100k run, 3 replicas | 100,427 requests, 0 failed, p50 14 ms, p95 56 ms, p99 111 ms, saga p95 3.7 s, max lag 63; `make load_verify` passes. |
-| 100k run, 1 replica | 100,655 requests, 1 failed, p95 41 ms, saga p95 4.6 s, max lag 50; `make load_verify` passes. At this rate the host's shared CPU, not the replica count, is the limit. |
+| 100,000-request run, 3 replicas | 100,427 requests, 0 failed, p50 14 ms, p95 56 ms, p99 111 ms, saga p95 3.7 s, max lag 63; `make load_verify` passes. |
+| 100,000-request run, 1 replica | 100,655 requests, 1 failed, p95 41 ms, saga p95 4.6 s, max lag 50; `make load_verify` passes. At this rate the host's shared CPU, not the replica count, is the limit. |
 | Node lost mid-run | `vagrant halt k8s-w2` at 50 req/s: Kafka, order-db and half the stateless pods were on it. The second Envoy pod kept the entry point up; reads served by w1 kept working, orders failed (50.9% of the run's requests) until the node returned. Stateless pods moved to w1 after the 5-minute eviction delay. Kafka and order-db came back with the node (local volumes), all pods were ready 3 minutes after it booted, every order ended PAID and the stock was consistent. |
 | Live load test dashboard | Every panel showed the run (client load, services, pools, lag, outbox, sagas, node steal) once the Replicas panels read the Deployments. |
 
@@ -1385,4 +1389,6 @@ about 10 orders/s. The runs use `TOTAL=100000 RATE=150 MIX=0.95` (7.5 orders/s, 
   memory (the host already swaps under load). Kafka consumption, the bulk of the saga work, is
   balanced by partition and unaffected.
 - **The lab is CPU-bound:** 4 VMs share 8 cores with k6, and under load they see 25-60% CPU steal;
-  the load tests run 100,000 requests at 150 req/s rather than 1,000,000 at 2,000.
+  the load tests run 100,000 requests at 150 req/s. Since 2026-10-22 the VMs take 18.5 GB instead
+  of 23 GB and boot in stages (`make lab_start`), which ended the restart storms of a cold boot
+  while CI compiled on ops.

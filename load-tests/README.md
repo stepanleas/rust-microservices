@@ -1,6 +1,6 @@
 # Load tests (k6)
 
-Repeatable load against the shop on kind or the homelab, up to 1,000,000 requests, with the
+Repeatable load against the shop on kind or the homelab, up to 100,000 requests per run, with the
 client's view (k6) and the system's reaction (Prometheus) on one Grafana screen.
 
 ```bash
@@ -8,7 +8,7 @@ make load_tool                         # k6 (version pinned in deploy/platform/v
 make load_seed                         # once per cluster: 50 products with a stock of 1,000,000,000
 make load SCENARIO=smoke               # k6 on this machine; TARGET=kind (default) or lab
 make load_verify                       # after a run: the shop is consistent
-make load_k8s SCENARIO=one-million PARALLELISM=4    # k6-operator runners inside the cluster
+make load_k8s SCENARIO=hundred-thousand PARALLELISM=4    # k6-operator runners inside the cluster
 ```
 
 `make pin_replicas N=3` fixes every service at 3 replicas (KEDA paused) for runs that compare
@@ -27,7 +27,7 @@ replica counts; `make unpin_replicas` hands them back to the autoscaler.
 | `stress` | the mix ramps to `MAX_RATE` in `STEPS` steps and stops at the first broken threshold: the knee | `MAX_RATE=3000`, `STEPS=6`, `STEP_DURATION_S=120` |
 | `spike` | `BASE_RATE` → `PEAK_RATE` in 10 s, `HOLD`, back down, 2 min to drain | `50` → `1500`, `HOLD=1m` |
 | `soak` | the mix at a moderate rate for a long time: leaks, outbox growth, connection churn | `RATE=200`, `DURATION=1h` |
-| `one-million` | exactly `TOTAL` requests at `RATE`: `TOTAL × MIX` reads and the rest orders, spread evenly over `TOTAL / RATE` seconds. `PROFILE=max` ramps to `MAX_RATE` instead and stops at the first broken threshold | `TOTAL=1000000`, `RATE=2000` (8m20s), `MIX=0.8` |
+| `hundred-thousand` | exactly `TOTAL` requests at `RATE`: `TOTAL × MIX` reads and the rest orders, spread evenly over `TOTAL / RATE` seconds. `PROFILE=max` ramps to `MAX_RATE` instead and stops at the first broken threshold | `TOTAL=100000`, `RATE=150` (11m07s), `MIX=0.95` |
 
 Common settings: `BASE_URL` (default `http://localhost:8088` on kind, `https://shop.lab.internal`
 on the lab, `http://api-gateway.shop:8070` in the cluster), `DIRECT=1` to call the services at
@@ -35,7 +35,7 @@ on the lab, `http://api-gateway.shop:8070` in the cluster), `DIRECT=1` to call t
 `SAGA_SAMPLE` (0.01) share of orders followed until PAID/CANCELLED, `SAGA_TIMEOUT_S` (60).
 
 Every request is tagged `kind`: `read`, `order`, `saga-poll` (following a sampled saga) or `seed`
-(setup). The 1,000,000 of `one-million` are the `read` and `order` requests; the saga polls and the
+(setup). The 100,000 of `hundred-thousand` are the `read` and `order` requests; the saga polls and the
 setup come on top.
 
 ## Pass/fail
@@ -94,8 +94,8 @@ drained and `make load_verify` passed (21,634 orders PAID, nothing lost).
 
 ### Lab (2026-10-20)
 
-`one-million` runs `TOTAL=100000 RATE=150 MIX=0.95` on the lab (95% reads, 7.5 orders/s): a
-million requests at 2,000/s is beyond one laptop running four VMs (see "Lab vs kind" below).
+`hundred-thousand` runs with its defaults, `TOTAL=100000 RATE=150 MIX=0.95` (95% reads, 7.5
+orders/s): about what one laptop running four VMs sustains (see "Lab vs kind" below).
 
 | Date | Commit | Target | Scenario | Replicas | Rate | Requests | Req/s | p50 | p95 | p99 | Saga p95 | Max lag | Failed | Thresholds |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -104,9 +104,9 @@ million requests at 2,000/s is beyond one laptop running four VMs (see "Lab vs k
 | 2026-10-20 | fa71134 | lab | mixed | 3 | 150 | 65,523 | 135 | 150 ms | 4.68 s | 7.96 s | – | 5,981 | 17.62% | FAIL³ |
 | 2026-10-20 | 417f554 | lab | mixed | 3 | 150 | 92,153 | 180 | 75 ms | 594 ms | 1.31 s | 44.63 s | 11,646 | 0.00% | FAIL: saga_timeouts, dropped_iterations, order p95⁴ |
 | 2026-10-20 | 417f554 | lab | stress (`MAX_RATE=600`) | 2→4 (KEDA) | 100 | 5,625 | 91 | 27 ms | 141 ms | 275 ms | 9.44 s | 253 | 0.00% | stopped: 1 dropped iteration⁵ |
-| 2026-10-20 | 1d64708 | lab | one-million (100k) | 3 | 150 | 100,380 | 150 | 18 ms | 77 ms | 169 ms | 3.47 s | 38 | 0.00% | FAIL: dropped_iterations (31)⁶ |
-| 2026-10-20 | d86c3d8 | lab | one-million (100k) | 3 | 150 | 100,427 | 150 | 14 ms | 56 ms | 111 ms | 3.73 s | 63 | 0.00% | dropped_iterations (15) only; verify ok |
-| 2026-10-20 | d86c3d8 | lab | one-million (100k) | 1 | 150 | 100,655 | 150 | 10 ms | 41 ms | 100 ms | 4.61 s | 50 | 0.00% | dropped_iterations (54) only; verify ok |
+| 2026-10-20 | 1d64708 | lab | hundred-thousand | 3 | 150 | 100,380 | 150 | 18 ms | 77 ms | 169 ms | 3.47 s | 38 | 0.00% | FAIL: dropped_iterations (31)⁶ |
+| 2026-10-20 | d86c3d8 | lab | hundred-thousand | 3 | 150 | 100,427 | 150 | 14 ms | 56 ms | 111 ms | 3.73 s | 63 | 0.00% | dropped_iterations (15) only; verify ok |
+| 2026-10-20 | d86c3d8 | lab | hundred-thousand | 1 | 150 | 100,655 | 150 | 10 ms | 41 ms | 100 ms | 4.61 s | 50 | 0.00% | dropped_iterations (54) only; verify ok |
 | 2026-10-20 | d86c3d8 | lab | mixed, k8s-w2 halted | 3 | 50 | 30,062 | 40 | 23 ms | 6.58 s | 9.53 s | 2.94 s | 31 | 50.89% | FAIL (node loss)⁷ |
 
 ² payment paused with KEDA for the lag alert: sagas can't finish.

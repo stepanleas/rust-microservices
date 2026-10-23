@@ -1,5 +1,5 @@
-// Exactly TOTAL (1,000,000) requests at RATE (2000) requests/s, so TOTAL / RATE seconds (8m20s): a MIX
-// (0.8) share reads, the rest orders. Each of the two scenarios starts exactly its share of
+// Exactly TOTAL (100,000) requests at RATE (150) requests/s, so TOTAL / RATE seconds (11m07s): a MIX
+// (0.95) share reads, the rest orders. Each of the two scenarios starts exactly its share of
 // iterations (one request each), spread evenly over the run. On top of that come the GETs that
 // follow SAGA_SAMPLE (1%) of the sagas (tag kind=saga-poll) and the setup's requests (kind=seed).
 //
@@ -10,9 +10,9 @@ import { mixedRampingScenarios, readsAndOrders } from '../lib/mix.js';
 import { loadShop } from '../lib/shop.js';
 import { summaryTrendStats, thresholds } from '../lib/thresholds.js';
 
-const TOTAL = num('TOTAL', 1000000);
-const RATE = num('RATE', 2000);
-const MIX = num('MIX', 0.8);
+const TOTAL = num('TOTAL', 100000);
+const RATE = num('RATE', 150);
+const MIX = num('MIX', 0.95);
 const MAX = env('PROFILE', 'default') === 'max';
 
 function exactly() {

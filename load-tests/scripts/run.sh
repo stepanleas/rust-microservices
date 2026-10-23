@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs a k6 scenario from this machine against kind or the lab:
-#   SCENARIO=smoke|read-heavy|place-orders|mixed|stress|spike|soak|one-million|seed  (default smoke)
+#   SCENARIO=smoke|read-heavy|place-orders|mixed|stress|spike|soak|hundred-thousand|seed  (default smoke)
 #   TARGET=kind (default, http://localhost:8088) | lab (https://shop.lab.internal)
 # The scenarios' own settings (RATE, DURATION, MIX, ...) pass through the environment. On the lab
 # the CI runner pauses for the run (make lab_quiet / lab_unquiet).

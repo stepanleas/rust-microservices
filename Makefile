@@ -176,6 +176,26 @@ lab_verify:
 lab_bootstrap:
 	$(lab_ansible) ansible-playbook playbooks/argocd.yml $(if $(REVISION),-e argocd_revision=$(REVISION))
 
+# Fails when the lab no longer matches the code: the whole provisioning in check mode, which must
+# change nothing. REVISION=<branch> when Argo CD follows a branch (see lab_bootstrap).
+lab_drift:
+	REVISION=$(REVISION) ./infra/scripts/lab-drift.sh
+
+# Once per clone: remote `lab` = the lab's Forgejo, and `git push origin` pushes to GitHub and the lab.
+lab_remote:
+	./infra/scripts/lab-remote.sh
+
+# Catches the lab up with GitHub after it was down during a push: GitHub's branches, not tags (a
+# tag starts a release on the lab; push those one by one).
+lab_sync:
+	git fetch origin
+	git push lab 'refs/remotes/origin/*:refs/heads/*' '^refs/remotes/origin/HEAD'
+
+# Runs a CI workflow here with the lab's runner, to try a change without pushing:
+# make ci_exec WORKFLOW=infra.yml [JOB=kubernetes]
+ci_exec:
+	WORKFLOW=$(WORKFLOW) JOB=$(JOB) ./infra/scripts/ci-exec.sh
+
 # A SealedSecret for the lab, safe to commit: make seal NAME=… NS=… FROM=<KEY=value file> [OUT=…]
 seal:
 	NAME=$(NAME) NS=$(NS) FROM=$(FROM) OUT=$(OUT) ./deploy/scripts/seal.sh
@@ -220,6 +240,10 @@ lab_etcd_backup:
 
 lab_backup:
 	$(lab_ansible) ansible-playbook playbooks/backup.yml
+
+# Boots the halted lab in stages: ops, then the cluster; the CI runner waits until it is up.
+lab_start:
+	./infra/scripts/lab-start.sh
 
 lab_halt:
 	$(lab_vagrant) halt

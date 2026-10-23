@@ -33,12 +33,16 @@
     src: /etc/kubernetes/admin.conf
   register: kubeadm_admin_conf
 
+# Not in check mode (make lab_drift): it creates a bootstrap token, and a check only looks at
+# workers that have joined already.
 - name: Join command for the workers
   ansible.builtin.command: kubeadm token create --ttl 30m --print-join-command
   register: kubeadm_join
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Join parameters
+  when: not ansible_check_mode
   ansible.builtin.set_fact:
     kubeadm_join_token: "{{ kubeadm_join.stdout | regex_search('--token (\\S+)', '\\1') | first }}"
     kubeadm_join_ca_hash: "{{ kubeadm_join.stdout | regex_search('--discovery-token-ca-cert-hash (\\S+)', '\\1') | first }}"

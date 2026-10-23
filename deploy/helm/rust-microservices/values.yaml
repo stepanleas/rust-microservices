@@ -29,6 +29,10 @@ kafka:
   version: 4.3.1
   storageSize: 10Gi
   partitions: 12
+  # The broker's container resources and JVM options (heap: -Xms/-Xmx). Empty = Strimzi's
+  # defaults, where the heap grows with the node's memory.
+  resources: {}
+  jvmOptions: {}
   # Exposes the broker outside the cluster on fixed NodePorts (kind: mapped to the host).
   external:
     enabled: false
@@ -70,6 +74,9 @@ postgres:
   clusters: [catalog, customer, order, restaurant, payment]
   instances: 1
   storageSize: 5Gi
+  # CloudNativePG's startup/liveness/readiness probe settings (Cluster spec.probes). Empty = its
+  # defaults (5 s timeout).
+  probes: {}
   pooler:
     instances: 1
     # Session mode: the services use prepared statements (diesel) and a session advisory lock

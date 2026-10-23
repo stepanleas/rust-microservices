@@ -19,6 +19,8 @@
   delegate_to: localhost
   become: false
   changed_when: false
+  # Read-only: also runs in check mode (make lab_drift), where the tasks below depend on it.
+  check_mode: false
 
 - name: Certificate expiry metric
   ansible.builtin.template:

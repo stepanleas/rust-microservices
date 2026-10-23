@@ -9,13 +9,15 @@ real machines.
 
 | VM | IP | vCPU / RAM / disk | Runs |
 |---|---|---|---|
-| `ops` | 192.168.56.10 | 4 / 6 GB / 80 GB | dnsmasq, Caddy (TLS), Zot registry + docker.io cache, Forgejo + Actions runner, ntfy, node-exporter, Alloy |
+| `ops` | 192.168.56.10 | 4 / 3.5 GB / 80 GB | dnsmasq, Caddy (TLS), Zot registry + docker.io cache, Forgejo + Actions runner, ntfy, node-exporter, Alloy |
 | `k8s-cp` | .11 | 2 / 4 GB / 30 GB | kubeadm control plane (tainted: no workloads) |
-| `k8s-w1`, `k8s-w2` | .12, .13 | 4 / 6.5 GB / 60 GB | workloads |
+| `k8s-w1`, `k8s-w2` | .12, .13 | 4 / 5.5 GB / 60 GB | workloads |
 | LoadBalancer pool | .200–.220 | | Cilium LB-IPAM, announced over ARP; `.200` is the cluster ingress |
 
-That's 23 GB of RAM and 14 vCPUs. CPU is overcommitted on 8 host threads, which is fine for a
-lab. Disks are thin-provisioned. **Stop kind first** (`make kind_down`, or `docker stop` its
+That's 18.5 GB of RAM and 14 vCPUs. CPU is overcommitted on 8 host threads, which is fine for a
+lab. The VMs hand their free memory back to the host (free page reporting on the virtio balloon,
+turned on by `scripts/vm-before-up.sh` before each `vagrant up`, which also applies a changed memory size), and the CI runner
+takes one job at a time. Disks are thin-provisioned. **Stop kind first** (`make kind_down`, or `docker stop` its
 node containers): both together don't fit in 31 GB.
 
 ## Who does what
@@ -81,8 +83,13 @@ Then:
 | `make lab_renew_certs` | renews kubeadm's certificates (they expire after a year; upgrades also renew them) |
 | `make lab_k8s_reset` | rebuilds the cluster on the existing VMs (workloads are lost) |
 | `make lab_etcd_backup` / `lab_backup` | etcd snapshot + PKI (and a Forgejo dump) to `~/.lab/backups/<time>/` |
+| `make lab_start` | boots the halted lab in stages: ops (DNS, registry) with its CI runner stopped, then the cluster VMs; the runner starts once Postgres, Kafka and Argo CD are Ready. All four at once left every pod restarting on probe timeouts |
 | `make lab_halt` / `lab_destroy` | stop / delete the VMs (`~/.lab` is kept, so a rebuild reuses the CA) |
 | `make lab_bootstrap [REVISION=<branch>]` | Argo CD + the root Application (also part of `lab_provision`); `REVISION` makes the lab follow a branch instead of `main` |
+| `make lab_drift [REVISION=<branch>]` | drift check: the whole provisioning in check mode, failing when it would change anything. Runs on this machine, not in CI: the playbooks need the lab CA, the vault password and the VMs' SSH keys from `~/.lab` and `.vagrant` |
+| `make lab_remote` | once per clone: remote `lab`, and `git push origin` pushes to GitHub and the lab |
+| `make lab_sync` | after the lab was down during a push: pushes GitHub's branches to the lab (no tags: a tag starts a release; never rewinds a branch) |
+| `make ci_exec WORKFLOW=infra.yml [JOB=…]` | runs a workflow here with the lab's runner and job image (`forgejo-runner exec`), lab variables but no secrets |
 | `make seal NAME=… NS=… FROM=<file> [OUT=…]` | a SealedSecret from a `KEY=value` file, safe to commit; only the lab cluster can decrypt it |
 
 ## CI/CD and GitOps

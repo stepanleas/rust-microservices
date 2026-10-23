@@ -20,11 +20,15 @@ box:
   name: cloud-image/ubuntu-24.04
   version: 20260926.0.0
 
+# Memory is sized for a 32 GB laptop that also runs a desktop: 18.5 GiB in all. The guests hand
+# their free memory back to the host (free page reporting, Vagrantfile), not their page cache.
 vms:
+  # Forgejo, Zot, ntfy and the rest use ~0.5 GB; the remainder is for one CI job at a time
+  # (runner capacity 1, roles/forgejo_runner).
   - name: ops
     ip: 192.168.56.10
     cpus: 4
-    memory: 6144
+    memory: 3584
     disk: 80
     groups: [ops_vm]
   - name: k8s-cp
@@ -36,12 +40,12 @@ vms:
   - name: k8s-w1
     ip: 192.168.56.12
     cpus: 4
-    memory: 6656
+    memory: 5632
     disk: 60
     groups: [kubernetes, workers]
   - name: k8s-w2
     ip: 192.168.56.13
     cpus: 4
-    memory: 6656
+    memory: 5632
     disk: 60
     groups: [kubernetes, workers]
